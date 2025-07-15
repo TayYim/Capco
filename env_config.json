@@ -1,0 +1,9 @@
+{
+    "env": {
+      "CARLA_ROOT": "/home/tay/Applications/CARLA_LB",
+      "SCENARIO_RUNNER_ROOT": "/home/tay/Workspace/Carlo/dependencies/scenario_runner",
+      "LEADERBOARD_ROOT": "/home/tay/Workspace/Carlo/dependencies/leaderboard",
+      "LB_PYTHON_PATH": "/home/tay/miniconda3/envs/py38/bin/python",
+      "PROJECT_ROOT": "/home/tay/Workspace/Carlo"
+    }
+  }
