@@ -18,6 +18,8 @@ from datetime import datetime
 import shutil
 import logging
 import sys
+import json
+import csv
 from typing import Optional, List, Tuple, Dict
 
 # Add src directory to Python path for imports
@@ -63,6 +65,12 @@ class CarlaExperimentRunner:
         # Thread for monitoring user input
         self.input_thread = None
         self.old_settings = None
+        
+        # Data collection for experiment results
+        self.experiment_results = []
+        
+        # Scenario parameters for this experiment
+        self.scenario_parameters = {}
         
     def setup_logging(self):
         """Setup logging to both console and file."""
@@ -227,27 +235,178 @@ class CarlaExperimentRunner:
             self.logger.error(f"Error running simulation: {e}")
             return 1
             
-    def move_output_files(self, run_num: int):
-        """Move output files to organized directory structure."""
-        run_subdir = self.output_dir / f"run_{run_num}"
-        run_subdir.mkdir(exist_ok=True)
+    def process_epoch_result(self, run_num: int) -> Dict:
+        """Process epoch_result.json and extract key experiment data."""
+        epoch_file = self.script_dir / "epoch_result.json"
         
-        # File patterns to move
-        patterns = ["SPEC_*", "*.npy", "*.csv", "*.npz"]
+        if not epoch_file.exists():
+            self.logger.warning(f"No epoch_result.json found for run {run_num}")
+            result = {
+                'run_number': run_num,
+                'collision_flag': None,
+                'min_ttc': None,
+                'distance': None,
+                'ego_x': None, 'ego_y': None, 'ego_velocity': None, 'ego_yaw': None,
+                'npc_x': None, 'npc_y': None, 'npc_velocity': None, 'npc_yaw': None
+            }
+            result.update(self.scenario_parameters)
+            return result
         
-        for pattern in patterns:
-            for file_path in self.script_dir.glob(pattern):
-                try:
-                    dest_path = run_subdir / file_path.name
-                    shutil.move(str(file_path), str(dest_path))
-                    self.logger.debug(f"Moved {file_path.name} to run_{run_num}/")
-                except Exception as e:
-                    self.logger.debug(f"Could not move {file_path}: {e}")
-                    
+        try:
+            with open(epoch_file, 'r') as f:
+                data = json.load(f)
+            
+            # Extract basic data
+            result = {
+                'run_number': run_num,
+                'collision_flag': data.get('collision_flag', None),
+                'min_ttc': data.get('min_ttc', None),
+                'distance': data.get('distance', None),
+                'ego_x': None, 'ego_y': None, 'ego_velocity': None, 'ego_yaw': None,
+                'npc_x': None, 'npc_y': None, 'npc_velocity': None, 'npc_yaw': None
+            }
+            
+            # Add scenario parameters to the result
+            result.update(self.scenario_parameters)
+            
+            # Extract collision status if available
+            collision_status = data.get('collision_status', {})
+            if collision_status:
+                ego_data = collision_status.get('EGO', [])
+                npc_data = collision_status.get('NPC', [])
+                
+                if len(ego_data) >= 4:
+                    result.update({
+                        'ego_x': ego_data[0],
+                        'ego_y': ego_data[1], 
+                        'ego_velocity': ego_data[2],
+                        'ego_yaw': ego_data[3]
+                    })
+                
+                if len(npc_data) >= 4:
+                    result.update({
+                        'npc_x': npc_data[0],
+                        'npc_y': npc_data[1],
+                        'npc_velocity': npc_data[2],
+                        'npc_yaw': npc_data[3]
+                    })
+            
+            # Print results to console
+            self.logger.info("=" * 50)
+            self.logger.info(f"RUN {run_num} RESULTS:")
+            self.logger.info("=" * 50)
+            self.logger.info(f"Collision occurred: {result['collision_flag']}")
+            self.logger.info(f"Minimum TTC: {result['min_ttc']}")
+            self.logger.info(f"Distance: {result['distance']}")
+            
+            if result['collision_flag']:
+                self.logger.info("Collision Details:")
+                self.logger.info(f"  EGO - Position: ({result['ego_x']:.2f}, {result['ego_y']:.2f}), "
+                               f"Velocity: {result['ego_velocity']:.2f}, Yaw: {result['ego_yaw']:.2f}°")
+                self.logger.info(f"  NPC - Position: ({result['npc_x']:.2f}, {result['npc_y']:.2f}), "
+                               f"Velocity: {result['npc_velocity']:.2f}, Yaw: {result['npc_yaw']:.2f}°")
+            else:
+                self.logger.info("No collision detected")
+            
+            self.logger.info("=" * 50)
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Error parsing epoch_result.json for run {run_num}: {e}")
+            result = {
+                'run_number': run_num,
+                'collision_flag': None,
+                'min_ttc': None,
+                'distance': None,
+                'ego_x': None, 'ego_y': None, 'ego_velocity': None, 'ego_yaw': None,
+                'npc_x': None, 'npc_y': None, 'npc_velocity': None, 'npc_yaw': None
+            }
+            result.update(self.scenario_parameters)
+            return result
+        except Exception as e:
+            self.logger.error(f"Unexpected error processing epoch_result.json for run {run_num}: {e}")
+            result = {
+                'run_number': run_num,
+                'collision_flag': None,
+                'min_ttc': None,
+                'distance': None,
+                'ego_x': None, 'ego_y': None, 'ego_velocity': None, 'ego_yaw': None,
+                'npc_x': None, 'npc_y': None, 'npc_velocity': None, 'npc_yaw': None
+            }
+            result.update(self.scenario_parameters)
+            return result
+
+    def save_results_to_csv(self):
+        """Save all experiment results to a CSV file including scenario parameters."""
+        if not self.experiment_results:
+            self.logger.warning("No experiment results to save")
+            return
+        
+        csv_file = self.output_dir / "experiment_results.csv"
+        
+        try:
+            with open(csv_file, 'w', newline='') as f:
+                # Define base CSV columns
+                base_fieldnames = [
+                    'run_number', 'collision_flag', 'min_ttc', 'distance',
+                    'ego_x', 'ego_y', 'ego_velocity', 'ego_yaw',
+                    'npc_x', 'npc_y', 'npc_velocity', 'npc_yaw'
+                ]
+                
+                # Add scenario parameter columns dynamically
+                scenario_fieldnames = []
+                if self.scenario_parameters:
+                    # Order scenario columns consistently
+                    scenario_keys = ['scenario_name', 'scenario_type'] + [k for k in sorted(self.scenario_parameters.keys()) 
+                                                                         if k not in ['scenario_name', 'scenario_type']]
+                    scenario_fieldnames = scenario_keys
+                
+                # Combine all fieldnames
+                fieldnames = base_fieldnames + scenario_fieldnames
+                
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                for result in self.experiment_results:
+                    writer.writerow(result)
+            
+            self.logger.info(f"Experiment results saved to: {csv_file}")
+            
+            # Print summary statistics including scenario info
+            total_runs = len(self.experiment_results)
+            collisions = sum(1 for r in self.experiment_results if r['collision_flag'] is True)
+            collision_rate = (collisions / total_runs * 100) if total_runs > 0 else 0
+            
+            self.logger.info("=" * 60)
+            self.logger.info("EXPERIMENT SUMMARY:")
+            self.logger.info("=" * 60)
+            if self.scenario_parameters:
+                self.logger.info(f"Scenario: {self.scenario_parameters.get('scenario_name', 'Unknown')}")
+                self.logger.info(f"Scenario Type: {self.scenario_parameters.get('scenario_type', 'Unknown')}")
+            self.logger.info(f"Total runs: {total_runs}")
+            self.logger.info(f"Collisions: {collisions}")
+            self.logger.info(f"Collision rate: {collision_rate:.1f}%")
+            self.logger.info(f"Successful runs: {total_runs - collisions}")
+            self.logger.info("=" * 60)
+            
+        except Exception as e:
+            self.logger.error(f"Error saving results to CSV: {e}")
+                     
     def clear_existing_logs(self):
         """Clear existing log files to prevent mixing with previous experiments."""
         self.logger.info("Clearing existing log files...")
         
+        # Clear epoch result file from previous runs
+        epoch_file = self.script_dir / "epoch_result.json"
+        if epoch_file.exists():
+            try:
+                epoch_file.unlink()
+                self.logger.debug("Removed previous epoch_result.json")
+            except Exception as e:
+                self.logger.debug(f"Could not remove epoch_result.json: {e}")
+        
+        # Clear other output files if needed
         patterns = ["SPEC_*", "*.npy", "*.csv", "*.npz"]
         for pattern in patterns:
             for file_path in self.script_dir.glob(pattern):
@@ -289,7 +448,10 @@ class CarlaExperimentRunner:
         # Display route and scenario information
         display_route_info(self.route_file, self.route_id, self.project_root, self.logger)
         
-        # Clear existing logs
+        # Extract scenario parameters for CSV inclusion
+        self.extract_scenario_parameters()
+        
+        # Clear existing logs before starting runs
         self.clear_existing_logs()
         
         # Create summary log
@@ -368,9 +530,9 @@ class CarlaExperimentRunner:
                     self.logger.info(f"Run {run} completed successfully")
                     self.log_run_result(summary_log, run, "completed successfully")
                     
-                # Move output files
-                self.logger.info(f"Organizing output files for run {run}...")
-                self.move_output_files(run)
+                # Process and collect experiment results
+                run_result = self.process_epoch_result(run)
+                self.experiment_results.append(run_result)
                 
                 # Wait between runs (except for last run)
                 if run < self.num_runs and not self.should_exit:
@@ -381,6 +543,9 @@ class CarlaExperimentRunner:
             # Cleanup
             self.cleanup()
             
+        # Save experiment results to CSV
+        self.save_results_to_csv()
+        
         # Final summary
         self.logger.info(f"All {self.num_runs} experiment runs completed.")
         self.logger.info(f"All results saved to: {self.output_dir}")
@@ -393,6 +558,33 @@ class CarlaExperimentRunner:
         self.logger.info("Cleaning up processes...")
         self.kill_carla_processes(force=True)
         self._restore_terminal()
+
+    def extract_scenario_parameters(self):
+        """Extract scenario parameters from the route XML for consistent CSV columns."""
+        from utils.xml_utils import parse_route_scenarios
+        
+        scenarios_info = parse_route_scenarios(self.route_file, self.route_id, self.project_root, self.logger)
+        
+        # Flatten all scenario parameters into a single dict
+        all_params = {}
+        for scenario_name, info in scenarios_info.items():
+            scenario_type = info['type']
+            parameters = info['parameters']
+            
+            # Add scenario type and name
+            all_params['scenario_name'] = scenario_name
+            all_params['scenario_type'] = scenario_type
+            
+            # Add all parameters with prefixes to avoid conflicts
+            for param_name, param_value in parameters.items():
+                all_params[f'param_{param_name}'] = param_value
+            
+            # For now, we'll use the first non-Data_Collect scenario
+            # In future, this could be enhanced to handle multiple scenarios
+            break
+        
+        self.scenario_parameters = all_params
+        return all_params
 
 
 
