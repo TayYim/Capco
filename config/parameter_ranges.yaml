@@ -1,0 +1,86 @@
+# Parameter Ranges Configuration
+# This file defines the parameter ranges used for scenario fuzzing.
+# Ranges are organized by parameter types (semantic categories) and can be 
+# overridden for specific scenario types.
+
+# Global default ranges organized by parameter semantic type
+# Format: parameter_name: [min_value, max_value]
+parameter_types:
+  # Velocity parameters (m/s)
+  velocity:
+    absolute_v: [5.0, 25.0]      # Vehicle absolute velocity
+    relative_v: [-15.0, 15.0]    # Relative velocity difference
+    v_ego: [0.1, 17.0]           # Ego vehicle velocity
+    v_1: [0.0, 15.0]             # NPC 1 velocity
+    v_2: [0.0, 15.0]             # NPC 2 velocity
+    v_3: [0.0, 15.0]             # NPC 3 velocity (for future scenarios)
+  
+  # Position parameters (m)
+  position:
+    relative_p: [5.0, 80.0]      # Relative position distance
+    relative_p_1: [5.0, 80.0]    # NPC 1 relative position
+    relative_p_2: [5.0, 80.0]    # NPC 2 relative position
+    relative_p_3: [5.0, 80.0]    # NPC 3 relative position (for future scenarios)
+    r_ego: [10.0, 70.0]          # Ego position range
+    r_1: [10.0, 70.0]            # NPC 1 position range
+    r_2: [10.0, 70.0]            # NPC 2 position range
+    r_3: [10.0, 70.0]            # NPC 3 position range (for future scenarios)
+  
+  # Timing parameters (s)
+  timing:
+    delay: [0.1, 3.0]            # Scenario trigger delay
+    duration: [1.0, 10.0]        # Scenario duration
+    reaction_time: [0.2, 2.0]    # NPC reaction time
+
+# Scenario-specific parameter range overrides
+# These override the global defaults for specific scenario types
+# Only specify parameters that need different ranges than the defaults
+scenario_overrides:
+  # Cut-in scenarios - more conservative ranges for safety
+  OSG_CutIn_One:
+    absolute_v: [8.0, 20.0]      # Slightly lower max speed for cut-in
+    relative_p: [10.0, 50.0]     # Closer range for more realistic cut-in
+    relative_v: [-10.0, 5.0]     # More conservative relative velocity
+  
+  OSG_CutIn_Two:
+    absolute_v: [8.0, 18.0]      # Even more conservative with two NPCs
+    relative_p_1: [15.0, 45.0]   # First NPC closer
+    relative_p_2: [20.0, 60.0]   # Second NPC farther
+    relative_v_1: [-8.0, 3.0]    # More conservative relative velocities
+    relative_v_2: [-5.0, 8.0]
+  
+  # Junction scenarios - lower speeds for safety
+  OSG_Junction:
+    v_ego: [1.0, 12.0]           # Lower ego speeds at junctions
+    v_1: [2.0, 10.0]             # Lower NPC speeds at junctions
+    r_ego: [15.0, 50.0]          # Appropriate distance ranges
+    r_1: [20.0, 60.0]            # NPC positioning for junction scenarios
+  
+
+# Fallback configuration
+fallback:
+  # Strategy when parameter not found in any category
+  # Options: "intelligent_defaults", "conservative", "wide_range"
+  strategy: "intelligent_defaults"
+  
+  # Default ranges when intelligent defaults cannot be determined
+  conservative_defaults:
+    velocity_range: [1.0, 15.0]
+    position_range: [5.0, 50.0]
+    timing_range: [0.1, 5.0]
+  
+  # Wide ranges for exploration when conservative is too restrictive
+  wide_defaults:
+    velocity_range: [0.1, 30.0]
+    position_range: [1.0, 100.0]
+    timing_range: [0.05, 10.0]
+
+# Configuration metadata
+metadata:
+  version: "1.0"
+  description: "Parameter ranges for CARLA scenario fuzzing"
+  last_updated: "2025-07-16"
+  units:
+    velocity: "m/s"
+    position: "m"
+    timing: "s" 

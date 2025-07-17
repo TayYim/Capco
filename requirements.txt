@@ -1,0 +1,11 @@
+matplotlib
+coverage
+shapely
+numpy
+pandas
+ordered_set
+tqdm
+pytest
+stable-baselines3
+scikit-opt
+PyYAML
