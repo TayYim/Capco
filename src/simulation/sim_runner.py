@@ -44,6 +44,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.xml_utils import display_route_info, parse_route_scenarios, validate_route_exists
 from utils.parameter_range_manager import ParameterRangeManager
+from rewards import RewardRegistry
 
 
 class SearchMethodRegistry:
@@ -170,7 +171,8 @@ class ScenarioFuzzer:
                  headless: bool = False,
                  parameter_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
                  random_seed: int = 42,
-                 restart_gap: int = 5):
+                 restart_gap: int = 5,
+                 reward_function: str = "ttc"):
         """
         Initialize the scenario fuzzer.
         
@@ -183,6 +185,7 @@ class ScenarioFuzzer:
             headless: Whether to run CARLA headless
             parameter_ranges: Custom parameter ranges for fuzzing
             random_seed: Random seed for reproducibility
+            reward_function: Name of the reward function to use
             restart_gap: Number of runs before restarting CARLA
         """
         # Validate search method
@@ -218,6 +221,14 @@ class ScenarioFuzzer:
         self.random_seed = random_seed
         self.parameter_ranges = parameter_ranges or {}
         
+        # Reward function configuration
+        self.reward_function_name = reward_function
+        try:
+            self.reward_function = RewardRegistry.get_function(reward_function)
+        except ValueError as e:
+            available_functions = RewardRegistry.list_functions()
+            raise ValueError(f"Invalid reward function '{reward_function}'. Available: {available_functions}") from e
+        
         # Search state management
         self.current_search_method = None
         self.search_history_data = {}
@@ -243,6 +254,9 @@ class ScenarioFuzzer:
         
         # Setup logging
         self.setup_logging()
+        
+        # Log reward function after logger is set up
+        self.logger.info(f"Using reward function: {reward_function}")
         
         # Initialize parameter range manager
         self.parameter_range_manager = ParameterRangeManager(logger=self.logger)
@@ -493,19 +507,19 @@ class ScenarioFuzzer:
         result = self.process_epoch_result(self.current_iteration)
         self.experiment_results.append(result)
         
-        # Calculate reward (lower is better)
+        # Calculate reward using selected reward function (lower is better)
+        reward = self.reward_function(result)
+        
+        # Log reward information
         collision_flag = result.get('collision_flag', False)
         min_ttc = result.get('min_ttc', None)
         
         if collision_flag:
-            reward = 0.0  # Best possible reward - we found a collision
-            self.logger.info(f"🎯 COLLISION FOUND! Reward: {reward}")
-        elif min_ttc is not None and min_ttc > 0:
-            reward = min_ttc  # Use TTC as reward (lower TTC = closer to collision = better)
-            self.logger.info(f"No collision, min TTC: {min_ttc:.3f}, reward: {reward:.3f}")
+            self.logger.info(f"🎯 COLLISION FOUND! Reward ({self.reward_function_name}): {reward:.3f}")
+        elif min_ttc is not None:
+            self.logger.info(f"No collision, min TTC: {min_ttc:.3f}, reward ({self.reward_function_name}): {reward:.3f}")
         else:
-            reward = 1000.0  # High penalty for invalid results
-            self.logger.info(f"Invalid result, penalty reward: {reward}")
+            self.logger.info(f"Invalid result, reward ({self.reward_function_name}): {reward:.3f}")
         
         # Update best solution
         if reward < self.best_reward:
@@ -606,7 +620,7 @@ class ScenarioFuzzer:
                 'search_method': self.current_search_method,
                 'total_iterations': self.current_iteration,
                 'collision_found': self.best_reward == 0.0,
-                'search_bounds': dict(zip(self._param_names, self._search_bounds)),
+                'search_bounds': dict(zip(self._param_names, self._search_bounds)) if self._search_bounds else {},
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -624,7 +638,7 @@ class ScenarioFuzzer:
     # Search method implementations
     @SearchMethodRegistry.register('random')
     @search_method_decorator('random')
-    def search_random(self, iterations: int = None) -> Tuple[List[float], float]:
+    def search_random(self, iterations: Optional[int] = None) -> Tuple[List[float], float]:
         """
         Random search method - baseline approach.
         
@@ -636,6 +650,9 @@ class ScenarioFuzzer:
         """
         if iterations is None:
             iterations = self.num_iterations
+            
+        if not self._search_bounds:
+            raise ValueError("No search bounds available for optimization")
             
         self.logger.info(f"Starting random search with {iterations} iterations")
         
@@ -658,12 +675,14 @@ class ScenarioFuzzer:
                 self.logger.info("Collision found! Terminating search early.")
                 break
         
+        if self.best_solution is None:
+            raise ValueError("No valid solution found during search")
         return self.best_solution, self.best_reward
 
     @SearchMethodRegistry.register('pso')
     @search_method_decorator('pso')
     def search_pso(self, 
-                   iterations: int = None,
+                   iterations: Optional[int] = None,
                    pop_size: int = 20,
                    w: float = 0.8,
                    c1: float = 0.5,
@@ -687,6 +706,9 @@ class ScenarioFuzzer:
         if iterations is None:
             iterations = self.num_iterations
             
+        if not self._search_bounds:
+            raise ValueError("No search bounds available for optimization")
+            
         self.logger.info(f"Starting PSO search with {iterations} iterations, population size {pop_size}")
         
         # Setup PSO
@@ -705,7 +727,7 @@ class ScenarioFuzzer:
     @SearchMethodRegistry.register('ga')
     @search_method_decorator('ga')
     def search_ga(self,
-                  iterations: int = None,
+                  iterations: Optional[int] = None,
                   pop_size: int = 50,
                   prob_mut: float = 0.1) -> Tuple[List[float], float]:
         """
@@ -724,6 +746,9 @@ class ScenarioFuzzer:
             
         if iterations is None:
             iterations = self.num_iterations
+            
+        if not self._search_bounds:
+            raise ValueError("No search bounds available for optimization")
             
         self.logger.info(f"Starting GA search with {iterations} generations, population size {pop_size}")
         
@@ -1081,8 +1106,9 @@ class ScenarioFuzzer:
             all_params['scenario_type'] = scenario_type
             
             # Add all parameters with prefixes to avoid conflicts
-            for param_name, param_value in parameters.items():
-                all_params[f'param_{param_name}'] = param_value
+            if isinstance(parameters, dict):
+                for param_name, param_value in parameters.items():
+                    all_params[f'param_{param_name}'] = param_value
             
             # For now, we'll use the first non-Data_Collect scenario
             # In future, this could be enhanced to handle multiple scenarios
@@ -1135,6 +1161,9 @@ Examples:
                        help="Random seed for reproducibility (default: 42)")
     parser.add_argument("--restart-gap", type=int, default=5,
                        help="Number of runs before restarting Carla (default: 5)")
+    parser.add_argument("--reward-function", type=str, default="ttc",
+                       help="Reward function to use for optimization. "
+                            "Available: collision, distance, safety_margin, ttc, ttc_div_dist, weighted_multi (default: ttc)")
     
     args = parser.parse_args()
     
@@ -1153,6 +1182,15 @@ Examples:
         print("Install with: pip install scikit-opt")
         sys.exit(1)
     
+    # Validate reward function
+    try:
+        RewardRegistry.get_function(args.reward_function)
+    except ValueError:
+        available_functions = RewardRegistry.list_functions()
+        print(f"Error: Unknown reward function '{args.reward_function}'")
+        print(f"Available reward functions: {available_functions}")
+        sys.exit(1)
+    
     # Create and run fuzzer
     fuzzer = ScenarioFuzzer(
         route_id=args.route_id,
@@ -1162,7 +1200,8 @@ Examples:
         timeout_seconds=args.timeout,
         headless=args.headless,
         random_seed=args.seed,
-        restart_gap=args.restart_gap
+        restart_gap=args.restart_gap,
+        reward_function=args.reward_function
     )
     
     try:
