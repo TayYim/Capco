@@ -11,7 +11,9 @@ import {
   ChartBarIcon,
   InformationCircleIcon,
   BeakerIcon,
-  DocumentIcon
+  DocumentIcon,
+  TrashIcon,
+  DocumentDuplicateIcon
 } from '@heroicons/react/24/outline'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
@@ -46,14 +48,27 @@ export function ExperimentPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [selectedRoute, setSelectedRoute] = useState<string>('')
-
+  
+  // Check if we're in edit mode (from URL params)
+  const searchParams = new URLSearchParams(window.location.search)
+  const isEditMode = searchParams.get('edit') === 'true'
+  
   const isEditing = Boolean(id)
+  const isCreating = !id
+  const isEditingConfig = isCreating || isEditMode
 
   // Fetch existing experiment if editing
   const { data: experiment, isLoading: experimentLoading } = useQuery({
     queryKey: ['experiment', id],
     queryFn: () => apiClient.getExperiment(id!),
     enabled: isEditing,
+    refetchInterval: (query) => {
+      // Poll every 2 seconds if experiment is running, every 10 seconds otherwise
+      if (query.state.data?.status === 'running') {
+        return 2000 // 2 seconds for running experiments
+      }
+      return 10000 // 10 seconds for other statuses
+    },
   })
 
   // Fetch route files
@@ -166,6 +181,32 @@ export function ExperimentPage() {
     }
   })
 
+  // Duplicate experiment mutation
+  const duplicateMutation = useMutation({
+    mutationFn: (experimentId: string) => apiClient.duplicateExperiment(experimentId),
+    onSuccess: (data) => {
+      toast.success('Experiment duplicated successfully!')
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      navigate(`/experiment/${data.id}?edit=true`)
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to duplicate experiment')
+    }
+  })
+
+  // Delete experiment mutation
+  const deleteMutation = useMutation({
+    mutationFn: (experimentId: string) => apiClient.deleteExperiment(experimentId),
+    onSuccess: () => {
+      toast.success('Experiment deleted successfully!')
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      navigate('/history')
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to delete experiment')
+    }
+  })
+
   const onSubmit = (data: ExperimentFormData) => {
     const config: ExperimentConfig = {
       route_id: data.route_id,
@@ -192,6 +233,12 @@ export function ExperimentPage() {
     createMutation.mutate({ config, startImmediately: false })
   }
 
+  const handleExitEditMode = () => {
+    if (id) {
+      navigate(`/experiment/${id}`)
+    }
+  }
+
   const handleStartExperiment = () => {
     if (id) {
       startMutation.mutate(id)
@@ -201,6 +248,20 @@ export function ExperimentPage() {
   const handleStopExperiment = () => {
     if (id) {
       stopMutation.mutate(id)
+    }
+  }
+
+  const handleDuplicateExperiment = () => {
+    if (id) {
+      duplicateMutation.mutate(id)
+    }
+  }
+
+  const handleDeleteExperiment = () => {
+    if (id && experiment) {
+      if (window.confirm(`Are you sure you want to delete experiment ${experiment.config.route_id}? This action cannot be undone.`)) {
+        deleteMutation.mutate(id)
+      }
     }
   }
 
@@ -222,12 +283,14 @@ export function ExperimentPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            {isEditing ? 'Experiment Details' : 'New Experiment'}
+            {isCreating ? 'New Experiment' : isEditMode ? 'Edit Experiment' : 'Experiment Details'}
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {isEditing 
-              ? `Configure and monitor your fuzzing experiment`
-              : 'Configure a new fuzzing experiment'
+            {isCreating 
+              ? 'Configure a new fuzzing experiment'
+              : isEditMode 
+                ? 'Edit the configuration and run the experiment'
+                : 'Configure and monitor your fuzzing experiment'
             }
           </p>
         </div>
@@ -255,6 +318,24 @@ export function ExperimentPage() {
                 Stop
               </button>
             )}
+            
+            <button
+              onClick={handleDuplicateExperiment}
+              disabled={duplicateMutation.isPending}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700"
+            >
+              <DocumentDuplicateIcon className="h-4 w-4 mr-2" />
+              {duplicateMutation.isPending ? 'Duplicating...' : 'Duplicate'}
+            </button>
+            
+            <button
+              onClick={handleDeleteExperiment}
+              disabled={deleteMutation.isPending}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 dark:bg-gray-800 dark:text-red-400 dark:border-gray-600 dark:hover:bg-red-900/20"
+            >
+              <TrashIcon className="h-4 w-4 mr-2" />
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </button>
           </div>
         )}
       </div>
@@ -280,7 +361,7 @@ export function ExperimentPage() {
                 </label>
                 <select
                   {...register('route_file')}
-                  disabled={isEditing}
+                  disabled={!isEditingConfig}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
                 >
                   <option value="">Select route file...</option>
@@ -301,7 +382,7 @@ export function ExperimentPage() {
                 </label>
                 <select
                   {...register('route_id')}
-                  disabled={isEditing || !routes}
+                  disabled={!isEditingConfig || !routes}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
                 >
                   <option value="">Select route...</option>
@@ -325,7 +406,7 @@ export function ExperimentPage() {
                 </label>
                 <select
                   {...register('search_method')}
-                  disabled={isEditing}
+                  disabled={!isEditingConfig}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
                 >
                   <option value="random">Random</option>
@@ -341,7 +422,7 @@ export function ExperimentPage() {
                 <input
                   type="number"
                   {...register('num_iterations', { valueAsNumber: true })}
-                  disabled={isEditing}
+                  disabled={!isEditingConfig}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
                 />
                 {errors.num_iterations && (
@@ -356,7 +437,7 @@ export function ExperimentPage() {
                 <input
                   type="number"
                   {...register('timeout_seconds', { valueAsNumber: true })}
-                  disabled={isEditing}
+                  disabled={!isEditingConfig}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
                 />
                 {errors.timeout_seconds && (
@@ -372,7 +453,7 @@ export function ExperimentPage() {
                 </label>
                 <select
                   {...register('reward_function')}
-                  disabled={isEditing}
+                  disabled={!isEditingConfig}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
                 >
                   <option value="collision">Collision</option>
@@ -391,7 +472,7 @@ export function ExperimentPage() {
                 <input
                   type="number"
                   {...register('random_seed', { valueAsNumber: true })}
-                  disabled={isEditing}
+                  disabled={!isEditingConfig}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
                 />
               </div>
@@ -400,7 +481,7 @@ export function ExperimentPage() {
                 <input
                   type="checkbox"
                   {...register('headless')}
-                  disabled={isEditing}
+                  disabled={!isEditingConfig}
                   className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded disabled:bg-gray-100"
                 />
                 <label className="ml-2 block text-sm text-gray-900 dark:text-white">
@@ -411,15 +492,15 @@ export function ExperimentPage() {
 
             {/* Method-specific parameters */}
             {searchMethod === 'pso' && (
-              <PSOParameters register={register} errors={errors} disabled={isEditing} />
+              <PSOParameters register={register} errors={errors} disabled={!isEditingConfig} />
             )}
 
             {searchMethod === 'ga' && (
-              <GAParameters register={register} errors={errors} disabled={isEditing} />
+              <GAParameters register={register} errors={errors} disabled={!isEditingConfig} />
             )}
 
-            {/* Submit button (only for new experiments) */}
-            {!isEditing && (
+            {/* Submit button (for new experiments and edit mode) */}
+            {isEditingConfig && (
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
@@ -428,12 +509,21 @@ export function ExperimentPage() {
                 >
                   Cancel
                 </button>
+                {isEditMode && (
+                  <button
+                    type="button"
+                    onClick={handleExitEditMode}
+                    className="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                  >
+                    View Only
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={isSubmitting || createMutation.isPending}
                   className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
                 >
-                  {createMutation.isPending ? 'Creating...' : 'Create Experiment'}
+                  {createMutation.isPending ? 'Creating...' : isEditMode ? 'Save & Create' : 'Create Experiment'}
                 </button>
               </div>
             )}

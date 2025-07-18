@@ -8,7 +8,7 @@ a clean interface for experiment management.
 
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 import json
@@ -29,7 +29,7 @@ from models.experiment import (
 from core.config import get_settings
 from core.database import (
     save_experiment_record, update_experiment_status,
-    get_experiment_record, list_experiment_records
+    get_experiment_record, list_experiment_records, delete_experiment_record
 )
 
 settings = get_settings()
@@ -42,6 +42,8 @@ class ExperimentService:
     def __init__(self):
         self.active_experiments: Dict[str, asyncio.Task] = {}
         self.experiment_status: Dict[str, dict] = {}
+        self._status_locks: Dict[str, asyncio.Lock] = {}
+        self._actual_output_dirs: Dict[str, str] = {}
         # Load existing experiments from database on startup
         self._load_experiments_from_database()
     
@@ -113,7 +115,7 @@ class ExperimentService:
             Created experiment status
         """
         experiment_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now()
         
         # Create output directory
         output_dir = Path(settings.output_dir) / f"experiment_{experiment_id}"
@@ -150,8 +152,9 @@ class ExperimentService:
             output_directory=str(output_dir)
         )
         
-        # Store in memory
+        # Store in memory with lock
         self.experiment_status[experiment_id] = experiment_status.dict()
+        self._status_locks[experiment_id] = asyncio.Lock()
         
         logger.info(f"Created experiment {experiment_id}")
         return experiment_status
@@ -219,6 +222,18 @@ class ExperimentService:
             return None
         
         status_dict = self.experiment_status[experiment_id]
+        
+        # Check for "zombie" experiments - marked as running but no active task
+        if (status_dict.get("status") == "running" and 
+            experiment_id not in self.active_experiments):
+            logger.warning(f"Detected zombie experiment {experiment_id} - marking as failed")
+            await self._update_experiment_status(
+                experiment_id, 
+                ExperimentStatusEnum.FAILED,
+                error_message="Experiment process died unexpectedly"
+            )
+            status_dict = self.experiment_status[experiment_id]
+        
         return ExperimentStatus(**status_dict)
     
     async def list_experiments(
@@ -377,6 +392,44 @@ class ExperimentService:
         
         return ExperimentStatus(**status_dict)
     
+    async def duplicate_experiment(self, experiment_id: str) -> Optional[ExperimentStatus]:
+        """
+        Duplicate an existing experiment with a new ID.
+        
+        Args:
+            experiment_id: ID of the experiment to duplicate
+            
+        Returns:
+            New experiment with same configuration but different ID
+        """
+        if experiment_id not in self.experiment_status:
+            return None
+        
+        # Get the original experiment
+        original_status_dict = self.experiment_status[experiment_id]
+        original_config = original_status_dict.get("config", {})
+        
+        # Create new experiment with same config
+        from models.experiment import ExperimentConfig, SearchMethodEnum, RewardFunctionEnum
+        
+        # Convert config dict back to ExperimentConfig object
+        config = ExperimentConfig(
+            route_id=original_config.get("route_id", ""),
+            route_file=original_config.get("route_file", ""),
+            search_method=SearchMethodEnum(original_config.get("search_method", "random")),
+            num_iterations=original_config.get("num_iterations", 10),
+            timeout_seconds=original_config.get("timeout_seconds", 300),
+            headless=original_config.get("headless", False),
+            random_seed=original_config.get("random_seed", 42),
+            reward_function=RewardFunctionEnum(original_config.get("reward_function", "ttc"))
+        )
+        
+        # Create the duplicated experiment
+        duplicated_experiment = await self.create_experiment(config)
+        
+        logger.info(f"Duplicated experiment {experiment_id} as {duplicated_experiment.id}")
+        return duplicated_experiment
+    
     async def delete_experiment(self, experiment_id: str) -> bool:
         """
         Delete an experiment and its files.
@@ -401,8 +454,18 @@ class ExperimentService:
             import shutil
             shutil.rmtree(output_dir)
         
-        # Remove from memory
+        # Delete from database
+        try:
+            delete_experiment_record(experiment_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete experiment record from database: {e}")
+        
+        # Remove from memory and cleanup tracking
         del self.experiment_status[experiment_id]
+        if experiment_id in self._status_locks:
+            del self._status_locks[experiment_id]
+        if experiment_id in self._actual_output_dirs:
+            del self._actual_output_dirs[experiment_id]
         
         logger.info(f"Deleted experiment {experiment_id}")
         return True
@@ -507,7 +570,9 @@ class ExperimentService:
             if config_dict["headless"]:
                 cmd.append("--headless")
             
-            logger.info(f"Running command: {' '.join(cmd)}")
+            logger.info(f"Starting experiment {experiment_id}")
+            logger.info(f"Working directory: {Path(settings.project_root) / 'src' / 'simulation'}")
+            logger.info(f"Command: {' '.join(cmd)}")
             
             # Start the subprocess with separate stdout and stderr
             process = await asyncio.create_subprocess_exec(
@@ -516,6 +581,8 @@ class ExperimentService:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=Path(settings.project_root) / "src" / "simulation"
             )
+            
+            logger.info(f"Subprocess started for experiment {experiment_id} with PID {process.pid}")
             
             # Update progress periodically by reading output
             best_reward = None
@@ -587,17 +654,54 @@ class ExperimentService:
             if stderr_task:
                 await stderr_task
             
-            # Check return code
-            if return_code == 0:
-                logger.info(f"Experiment {experiment_id} subprocess completed successfully")
+            # Check return code and completion
+            logger.info(f"Experiment {experiment_id} subprocess finished with return code: {return_code}")
+            
+            # Try to find the actual output directory that sim_runner.py used
+            actual_output_dir = None
+            status_dict = self.experiment_status.get(experiment_id, {})
+            
+            # Check if we have the actual output directory from console output
+            if experiment_id in self._actual_output_dirs:
+                actual_output_dir = Path(self._actual_output_dirs[experiment_id])
+                logger.info(f"Using actual output directory: {actual_output_dir}")
+                # Update the experiment status with the correct output directory
+                async with self._status_locks.get(experiment_id, asyncio.Lock()):
+                    status_dict["output_directory"] = str(actual_output_dir)
+            
+            # Check for results in both expected and actual directories
+            dirs_to_check = [output_dir]
+            if actual_output_dir and actual_output_dir != output_dir:
+                dirs_to_check.append(actual_output_dir)
+            
+            results_data = {}
+            has_results = False
+            best_reward = None
+            collision_found = False
+            
+            for check_dir in dirs_to_check:
+                results_file = check_dir / "best_solution.json"
+                search_history_file = check_dir / "search_history.csv"
                 
-                # Load final results
-                results_file = output_dir / "best_solution.json"
                 if results_file.exists():
-                    with open(results_file, 'r') as f:
-                        results = json.load(f)
-                        best_reward = results.get("best_reward", best_reward)
-                        collision_found = results.get("collision_found", collision_found)
+                    try:
+                        with open(results_file, 'r') as f:
+                            results_data = json.load(f)
+                            best_reward = results_data.get("best_reward", best_reward)
+                            collision_found = results_data.get("collision_found", collision_found)
+                            has_results = True
+                            logger.info(f"Loaded results from {results_file}: best_reward={best_reward}, collision_found={collision_found}")
+                            break
+                    except Exception as e:
+                        logger.warning(f"Failed to load results file {results_file}: {e}")
+                
+                if search_history_file.exists():
+                    has_results = True
+                    logger.info(f"Found search history file: {search_history_file}")
+                    break
+            
+            if return_code == 0 or has_results:
+                logger.info(f"Experiment {experiment_id} completed successfully (return_code={return_code}, has_results={has_results})")
                 
                 await self._update_experiment_status(
                     experiment_id, 
@@ -606,11 +710,16 @@ class ExperimentService:
                     collision_found=collision_found
                 )
                 
-                logger.info(f"Experiment {experiment_id} completed successfully with reward {best_reward}")
+                logger.info(f"Experiment {experiment_id} completed with final reward {best_reward}")
             else:
-                error_msg = f"Experiment subprocess failed with return code {return_code}"
+                error_msg = f"Experiment subprocess failed with return code {return_code} and no results generated"
                 logger.error(error_msg)
-                raise Exception(error_msg)
+                
+                await self._update_experiment_status(
+                    experiment_id, 
+                    ExperimentStatusEnum.FAILED,
+                    error_message=error_msg
+                )
             
         except asyncio.CancelledError:
             logger.info(f"Experiment {experiment_id} was cancelled")
@@ -635,9 +744,13 @@ class ExperimentService:
                 error_message=str(e)
             )
         finally:
-            # Clean up active experiment
+            # Always clean up active experiment tracking
             if experiment_id in self.active_experiments:
                 del self.active_experiments[experiment_id]
+            # Clean up output directory tracking for completed experiments
+            if experiment_id in self._actual_output_dirs:
+                del self._actual_output_dirs[experiment_id]
+            logger.info(f"Cleaned up active experiment tracking for {experiment_id}")
     
     async def _read_stream(self, stream, experiment_id: str, stream_name: str):
         """Read from a subprocess stream and log output."""
@@ -655,49 +768,108 @@ class ExperimentService:
                         logger.info(f"Experiment {experiment_id} [{stream_name}]: {line_str}")
                     
                     # Parse progress information from output
-                    self._parse_progress_info(experiment_id, line_str)
+                    await self._parse_progress_info(experiment_id, line_str)
                         
         except Exception as e:
             logger.error(f"Error reading {stream_name} for experiment {experiment_id}: {e}")
     
-    def _parse_progress_info(self, experiment_id: str, line_str: str):
+    async def _parse_progress_info(self, experiment_id: str, line_str: str):
         """Parse progress information from subprocess output."""
         try:
             best_reward = None
             collision_found = False
             current_iteration = 0
             
-            if "Best reward:" in line_str:
-                reward_part = line_str.split("Best reward:")[1].strip()
-                best_reward = float(reward_part.split()[0])
-            elif "Iteration" in line_str and "/" in line_str:
-                # Parse "Iteration X/Y" pattern
-                parts = line_str.split()
-                for i, part in enumerate(parts):
-                    if part == "Iteration" and i + 1 < len(parts):
-                        iter_part = parts[i + 1]
-                        if "/" in iter_part:
-                            current_iteration = int(iter_part.split("/")[0])
-                            break
-            elif "collision found" in line_str.lower() or "COLLISION FOUND" in line_str:
+            # Parse various patterns from sim_runner.py output
+            line_lower = line_str.lower()
+            
+            # Pattern: "Best reward: X.XXX"
+            if "best reward:" in line_lower:
+                try:
+                    reward_part = line_str.split(":")[-1].strip()
+                    best_reward = float(reward_part.split()[0])
+                except (ValueError, IndexError):
+                    pass
+            
+            # Pattern: "Iteration X/Y" or "Iteration: X/Y" 
+            elif "iteration" in line_lower and "/" in line_str:
+                try:
+                    # Find the iteration pattern
+                    import re
+                    match = re.search(r'iteration\s*:?\s*(\d+)\s*/\s*(\d+)', line_lower)
+                    if match:
+                        current_iteration = int(match.group(1))
+                except (ValueError, AttributeError):
+                    pass
+            
+            # Pattern: "Step X of Y" (alternative iteration format)
+            elif "step" in line_lower and "of" in line_lower:
+                try:
+                    import re
+                    match = re.search(r'step\s+(\d+)\s+of\s+(\d+)', line_lower)
+                    if match:
+                        current_iteration = int(match.group(1))
+                except (ValueError, AttributeError):
+                    pass
+            
+            # Pattern: collision detection
+            elif any(keyword in line_lower for keyword in ["collision found", "collision detected", "crash detected"]):
                 collision_found = True
+                logger.info(f"Collision detected in experiment {experiment_id}: {line_str}")
+            
+            # Pattern: "Reward: X.XXX" (alternative reward format)
+            elif line_lower.startswith("reward:") or "current reward:" in line_lower:
+                try:
+                    reward_part = line_str.split(":")[-1].strip()
+                    best_reward = float(reward_part.split()[0])
+                except (ValueError, IndexError):
+                    pass
+            
+            # Pattern: completion messages
+            elif any(keyword in line_lower for keyword in ["completed", "finished", "done"]):
+                logger.info(f"Completion indicator in experiment {experiment_id}: {line_str}")
+            
+            # Pattern: "Results saved to: /path/to/directory"
+            elif "results saved to:" in line_lower:
+                try:
+                    actual_path = line_str.split(":")[-1].strip()
+                    self._actual_output_dirs[experiment_id] = actual_path
+                    logger.info(f"Captured actual output directory for {experiment_id}: {actual_path}")
+                except Exception:
+                    pass
             
             # Update progress in status if we have new information
             if experiment_id in self.experiment_status and self.experiment_status[experiment_id] is not None:
-                if ("progress" not in self.experiment_status[experiment_id] or 
-                    self.experiment_status[experiment_id]["progress"] is None):
-                    self.experiment_status[experiment_id]["progress"] = {}
+                # Use async lock to prevent concurrent modification
+                if experiment_id not in self._status_locks:
+                    self._status_locks[experiment_id] = asyncio.Lock()
                 
-                progress = self.experiment_status[experiment_id]["progress"]
-                
-                if best_reward is not None:
-                    progress["best_reward"] = best_reward
-                if collision_found:
-                    progress["collision_found"] = True
-                if current_iteration > 0:
-                    progress["current_iteration"] = current_iteration
+                async with self._status_locks[experiment_id]:
+                    if ("progress" not in self.experiment_status[experiment_id] or 
+                        self.experiment_status[experiment_id]["progress"] is None):
+                        self.experiment_status[experiment_id]["progress"] = {
+                            "current_iteration": 0,
+                            "total_iterations": self.experiment_status[experiment_id]["config"].get("num_iterations", 10),
+                            "best_reward": None,
+                            "collision_found": False,
+                            "elapsed_time": None,
+                            "estimated_remaining": None,
+                            "recent_rewards": []
+                        }
                     
-        except (ValueError, IndexError) as e:
+                    progress = self.experiment_status[experiment_id]["progress"]
+                    
+                    if best_reward is not None:
+                        progress["best_reward"] = best_reward
+                        logger.debug(f"Updated best reward for {experiment_id}: {best_reward}")
+                    if collision_found:
+                        progress["collision_found"] = True
+                        logger.info(f"Updated collision status for {experiment_id}: True")
+                    if current_iteration > 0:
+                        progress["current_iteration"] = current_iteration
+                        logger.debug(f"Updated iteration for {experiment_id}: {current_iteration}")
+                    
+        except Exception as e:
             logger.debug(f"Could not parse progress from line: {line_str} - {e}")
     
     async def _update_experiment_status(
@@ -717,37 +889,40 @@ class ExperimentService:
         if experiment_id not in self.experiment_status:
             return
         
-        status_dict = self.experiment_status[experiment_id]
-        status_dict["status"] = status.value
+        # Use async lock to prevent concurrent modification
+        if experiment_id not in self._status_locks:
+            self._status_locks[experiment_id] = asyncio.Lock()
         
-        # Update timestamps
-        if status == ExperimentStatusEnum.RUNNING:
-            status_dict["started_at"] = datetime.utcnow().isoformat()
-        elif status in [ExperimentStatusEnum.COMPLETED, ExperimentStatusEnum.FAILED, ExperimentStatusEnum.STOPPED]:
-            status_dict["completed_at"] = datetime.utcnow().isoformat()
-        
-        # Update additional fields
-        for key, value in kwargs.items():
-            if key == "error_message":
-                status_dict["error_message"] = value
-            elif key == "final_reward":
-                if "progress" not in status_dict:
-                    status_dict["progress"] = {}
-                status_dict["progress"]["best_reward"] = value
-                # Also prepare for database update with correct field name
-                kwargs["best_reward"] = value
-            elif key == "collision_found":
-                if "progress" not in status_dict:
-                    status_dict["progress"] = {}
-                status_dict["progress"]["collision_found"] = value
-        
-        # Prepare database update kwargs with correct field names
-        db_kwargs = {}
-        for key, value in kwargs.items():
-            if key == "final_reward":
-                db_kwargs["best_reward"] = value
-            else:
-                db_kwargs[key] = value
+        async with self._status_locks[experiment_id]:
+            status_dict = self.experiment_status[experiment_id]
+            status_dict["status"] = status.value
+            
+            # Update timestamps
+            if status == ExperimentStatusEnum.RUNNING:
+                status_dict["started_at"] = datetime.now().isoformat()
+            elif status in [ExperimentStatusEnum.COMPLETED, ExperimentStatusEnum.FAILED, ExperimentStatusEnum.STOPPED]:
+                status_dict["completed_at"] = datetime.now().isoformat()
+            
+            # Prepare database update kwargs first (before modifying anything)
+            db_kwargs = {}
+            for key, value in kwargs.items():
+                if key == "final_reward":
+                    db_kwargs["best_reward"] = value
+                else:
+                    db_kwargs[key] = value
+            
+            # Update additional fields (safe to do after preparing db_kwargs)
+            for key, value in kwargs.items():
+                if key == "error_message":
+                    status_dict["error_message"] = value
+                elif key == "final_reward":
+                    if "progress" not in status_dict:
+                        status_dict["progress"] = {}
+                    status_dict["progress"]["best_reward"] = value
+                elif key == "collision_found":
+                    if "progress" not in status_dict:
+                        status_dict["progress"] = {}
+                    status_dict["progress"]["collision_found"] = value
         
         # Update database
         try:

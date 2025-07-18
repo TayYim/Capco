@@ -86,7 +86,7 @@ def save_experiment_record(
     **kwargs
 ) -> ExperimentRecord:
     """Save a new experiment record."""
-    db = next(get_db())
+    db = SessionLocal()
     try:
         record = ExperimentRecord(
             id=experiment_id,
@@ -109,7 +109,7 @@ def update_experiment_status(
     **kwargs
 ) -> Optional[ExperimentRecord]:
     """Update experiment status and metadata."""
-    db = next(get_db())
+    db = SessionLocal()
     try:
         record = db.query(ExperimentRecord).filter(
             ExperimentRecord.id == experiment_id
@@ -118,9 +118,9 @@ def update_experiment_status(
         if record:
             record.status = status
             if status == "running" and not record.started_at:
-                record.started_at = datetime.utcnow()
+                record.started_at = datetime.now()
             elif status in ["completed", "failed", "stopped"] and not record.completed_at:
-                record.completed_at = datetime.utcnow()
+                record.completed_at = datetime.now()
             
             for key, value in kwargs.items():
                 if hasattr(record, key):
@@ -137,7 +137,7 @@ def update_experiment_status(
 
 def get_experiment_record(experiment_id: str) -> Optional[ExperimentRecord]:
     """Get experiment record by ID."""
-    db = next(get_db())
+    db = SessionLocal()
     try:
         return db.query(ExperimentRecord).filter(
             ExperimentRecord.id == experiment_id
@@ -148,10 +148,27 @@ def get_experiment_record(experiment_id: str) -> Optional[ExperimentRecord]:
 
 def list_experiment_records(limit: int = 100, offset: int = 0) -> list[ExperimentRecord]:
     """List experiment records with pagination."""
-    db = next(get_db())
+    db = SessionLocal()
     try:
         return db.query(ExperimentRecord).order_by(
             ExperimentRecord.created_at.desc()
         ).offset(offset).limit(limit).all()
+    finally:
+        db.close()
+
+
+def delete_experiment_record(experiment_id: str) -> bool:
+    """Delete experiment record from database."""
+    db = SessionLocal()
+    try:
+        record = db.query(ExperimentRecord).filter(
+            ExperimentRecord.id == experiment_id
+        ).first()
+        
+        if record:
+            db.delete(record)
+            db.commit()
+            return True
+        return False
     finally:
         db.close() 

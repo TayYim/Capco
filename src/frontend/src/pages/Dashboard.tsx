@@ -25,6 +25,7 @@ export function Dashboard() {
   const { data: experiments, isLoading: experimentsLoading } = useQuery({
     queryKey: ['experiments', { limit: 5 }],
     queryFn: () => apiClient.listExperiments({ limit: 5 }),
+    refetchInterval: 10000, // Poll every 10 seconds for recent experiments
   })
 
   const { data: scenarios } = useQuery({

@@ -464,6 +464,37 @@ async def get_experiment_logs(
         )
 
 
+@router.post("/experiments/{experiment_id}/duplicate", response_model=ExperimentStatus, status_code=status.HTTP_201_CREATED)
+async def duplicate_experiment(
+    experiment_id: str,
+    experiment_service: ExperimentService = Depends(get_experiment_service)
+) -> ExperimentStatus:
+    """
+    Duplicate an existing experiment.
+    
+    Creates a copy of the experiment with the same configuration
+    but a new ID and reset status.
+    """
+    try:
+        duplicated_experiment = await experiment_service.duplicate_experiment(experiment_id)
+        
+        if not duplicated_experiment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Experiment {experiment_id} not found"
+            )
+        
+        return duplicated_experiment
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to duplicate experiment: {str(e)}"
+        )
+
+
 @router.delete("/experiments/{experiment_id}")
 async def delete_experiment(
     experiment_id: str,

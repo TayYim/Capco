@@ -124,8 +124,14 @@ class ApiClient {
     return response.data
   }
 
-  async deleteExperiment(id: string): Promise<void> {
-    await this.client.delete(`/api/experiments/${id}`)
+  async duplicateExperiment(id: string): Promise<ExperimentData> {
+    const response = await this.client.post(`/api/experiments/${id}/duplicate`)
+    return response.data
+  }
+
+  async deleteExperiment(id: string): Promise<{ message: string }> {
+    const response = await this.client.delete(`/api/experiments/${id}`)
+    return response.data
   }
 
   async downloadExperimentFile(id: string, filename: string): Promise<Blob> {

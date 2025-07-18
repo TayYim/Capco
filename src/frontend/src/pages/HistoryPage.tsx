@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   EyeIcon,
   TrashIcon,
@@ -11,9 +11,11 @@ import {
   StopIcon,
   CheckCircleIcon,
   XCircleIcon,
-  ClockIcon
+  ClockIcon,
+  DocumentDuplicateIcon
 } from '@heroicons/react/24/outline'
 import { motion } from 'framer-motion'
+import toast from 'react-hot-toast'
 import { apiClient } from '../services/api'
 import type { ExperimentListItem } from '../types'
 import clsx from 'clsx'
@@ -24,6 +26,7 @@ export function HistoryPage() {
   const [methodFilter, setMethodFilter] = useState<string>('')
   const [limit, setLimit] = useState(20)
   const [offset, setOffset] = useState(0)
+  const queryClient = useQueryClient()
 
   const { data: experiments, isLoading } = useQuery({
     queryKey: ['experiments', { limit, offset, statusFilter, methodFilter, search: searchQuery }],
@@ -33,6 +36,33 @@ export function HistoryPage() {
       status_filter: statusFilter || undefined,
       search_method: methodFilter || undefined,
     }),
+    refetchInterval: 5000, // Poll every 5 seconds for updated statuses
+  })
+
+  // Duplicate experiment mutation
+  const duplicateMutation = useMutation({
+    mutationFn: (experimentId: string) => apiClient.duplicateExperiment(experimentId),
+    onSuccess: (data) => {
+      toast.success('Experiment duplicated successfully!')
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+      // Navigate to the new experiment in edit mode
+      window.location.href = `/experiment/${data.id}?edit=true`
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to duplicate experiment')
+    }
+  })
+
+  // Delete experiment mutation
+  const deleteMutation = useMutation({
+    mutationFn: (experimentId: string) => apiClient.deleteExperiment(experimentId),
+    onSuccess: (data, experimentId) => {
+      toast.success('Experiment deleted successfully!')
+      queryClient.invalidateQueries({ queryKey: ['experiments'] })
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to delete experiment')
+    }
   })
 
   const filteredExperiments = experiments?.filter(experiment => {
@@ -222,7 +252,14 @@ export function HistoryPage() {
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {filteredExperiments.map((experiment) => (
-                  <ExperimentRow key={experiment.id} experiment={experiment} />
+                  <ExperimentRow 
+                    key={experiment.id} 
+                    experiment={experiment} 
+                    onDuplicate={(id) => duplicateMutation.mutate(id)}
+                    duplicating={duplicateMutation.isPending}
+                    onDelete={(id) => deleteMutation.mutate(id)}
+                    deleting={deleteMutation.isPending}
+                  />
                 ))}
               </tbody>
             </table>
@@ -304,7 +341,19 @@ export function HistoryPage() {
   )
 }
 
-function ExperimentRow({ experiment }: { experiment: ExperimentListItem }) {
+function ExperimentRow({ 
+  experiment, 
+  onDuplicate,
+  duplicating,
+  onDelete, 
+  deleting 
+}: { 
+  experiment: ExperimentListItem
+  onDuplicate: (id: string) => void
+  duplicating: boolean
+  onDelete: (id: string) => void
+  deleting: boolean
+}) {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
@@ -455,6 +504,28 @@ function ExperimentRow({ experiment }: { experiment: ExperimentListItem }) {
               <ArrowDownTrayIcon className="h-4 w-4" />
             </button>
           )}
+          
+          <button
+            onClick={() => onDuplicate(experiment.id)}
+            disabled={duplicating}
+            className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 disabled:opacity-50"
+            title="Duplicate experiment"
+          >
+            <DocumentDuplicateIcon className="h-4 w-4" />
+          </button>
+          
+          <button
+            onClick={() => {
+              if (window.confirm(`Are you sure you want to delete experiment ${experiment.route_id}? This action cannot be undone.`)) {
+                onDelete(experiment.id)
+              }
+            }}
+            disabled={deleting}
+            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50"
+            title="Delete experiment"
+          >
+            <TrashIcon className="h-4 w-4" />
+          </button>
         </div>
       </td>
     </tr>
