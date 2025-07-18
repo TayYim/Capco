@@ -1,0 +1,40 @@
+# FastAPI and web framework dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database and ORM
+sqlalchemy==2.0.23
+alembic==1.12.1
+
+# Data validation and serialization
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Security and authentication
+
+python-multipart==0.0.6
+
+# File handling and utilities
+aiofiles==23.2.1
+python-magic==0.4.27
+
+# Logging and monitoring
+structlog==23.2.0
+
+# Development and testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
+
+# Optional dependencies for enhanced functionality
+# Uncomment if using Redis for caching/rate limiting
+# redis==5.0.1
+# aioredis==2.0.1
+
+# Uncomment if using advanced monitoring
+# prometheus-client==0.19.0
+
+# Data analysis and manipulation
+pandas==2.1.4
+numpy==1.24.4 

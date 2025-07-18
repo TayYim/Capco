@@ -35,10 +35,15 @@ try:
     from sko.PSO import PSO
     from sko.GA import GA
     SKO_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError) as e:
+    # ImportError: sko not installed
+    # RuntimeError: multiprocessing context already set (happens with uvicorn --reload)
     PSO = None
     GA = None
     SKO_AVAILABLE = False
+    if isinstance(e, RuntimeError) and "context has already been set" in str(e):
+        # This is expected when running under uvicorn with reload
+        pass
 
 # Add src directory to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -700,7 +705,7 @@ class ScenarioFuzzer:
         Returns:
             Tuple of (best_parameters, best_reward)
         """
-        if not SKO_AVAILABLE:
+        if not SKO_AVAILABLE or PSO is None:
             raise ImportError("PSO requires scikit-opt library. Install with: pip install scikit-opt")
             
         if iterations is None:
@@ -717,12 +722,12 @@ class ScenarioFuzzer:
         ub = [bound[1] for bound in self._search_bounds]
         
         pso = PSO(func=self._evaluate_scenario, n_dim=n_dim, pop=pop_size, max_iter=iterations,
-                  lb=lb, ub=ub, w=w, c1=c1, c2=c2)
+                  lb=lb, ub=ub, w=w, c1=c1, c2=c2)  # type: ignore
         
         # Run PSO
         best_x, best_y = pso.run()
         
-        return best_x.tolist(), best_y
+        return best_x.tolist(), float(best_y)
 
     @SearchMethodRegistry.register('ga')
     @search_method_decorator('ga')
@@ -741,7 +746,7 @@ class ScenarioFuzzer:
         Returns:
             Tuple of (best_parameters, best_reward)
         """
-        if not SKO_AVAILABLE:
+        if not SKO_AVAILABLE or GA is None:
             raise ImportError("GA requires scikit-opt library. Install with: pip install scikit-opt")
             
         if iterations is None:
@@ -758,12 +763,12 @@ class ScenarioFuzzer:
         ub = [bound[1] for bound in self._search_bounds]
         
         ga = GA(func=self._evaluate_scenario, n_dim=n_dim, size_pop=pop_size, max_iter=iterations,
-                lb=lb, ub=ub, prob_mut=prob_mut, precision=1e-7)
+                lb=lb, ub=ub, prob_mut=prob_mut, precision=1e-7)  # type: ignore
         
         # Run GA
         best_x, best_y = ga.run()
         
-        return best_x, best_y
+        return best_x.tolist(), float(best_y)
 
     def run_search(self) -> Tuple[List[float], float]:
         """
