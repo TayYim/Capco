@@ -90,6 +90,155 @@ async def list_experiments(
         )
 
 
+@router.get("/experiments/stats")
+async def get_experiments_stats(
+    experiment_service: ExperimentService = Depends(get_experiment_service)
+) -> Dict[str, Any]:
+    """
+    Get experiment statistics and summary.
+    
+    Returns overall statistics about experiments.
+    """
+    try:
+        experiments = await experiment_service.list_experiments(limit=1000)
+        
+        total_experiments = len(experiments)
+        status_counts = {}
+        method_counts = {}
+        recent_experiments = 0
+        
+        from datetime import datetime, timedelta
+        recent_cutoff = datetime.utcnow() - timedelta(days=7)
+        
+        for exp in experiments:
+            # Count by status
+            status_counts[exp.status] = status_counts.get(exp.status, 0) + 1
+            
+            # Count by method
+            method_counts[exp.search_method] = method_counts.get(exp.search_method, 0) + 1
+            
+            # Count recent experiments
+            if exp.created_at > recent_cutoff:
+                recent_experiments += 1
+        
+        return {
+            "total_experiments": total_experiments,
+            "recent_experiments": recent_experiments,
+            "status_counts": status_counts,
+            "method_counts": method_counts,
+            "success_rate": 0.0,  # Placeholder
+            "average_duration": 0.0  # Placeholder
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get experiment stats: {str(e)}"
+        )
+
+
+@router.get("/experiments/summary")
+async def get_experiments_summary(
+    experiment_service: ExperimentService = Depends(get_experiment_service)
+) -> Dict[str, Any]:
+    """
+    Get experiment summary for dashboard.
+    
+    Returns summary information for the experiments dashboard.
+    """
+    try:
+        experiments = await experiment_service.list_experiments(limit=100)
+        
+        # Calculate summary stats
+        total = len(experiments)
+        running = sum(1 for exp in experiments if exp.status == "running")
+        completed = sum(1 for exp in experiments if exp.status == "completed")
+        failed = sum(1 for exp in experiments if exp.status == "failed")
+        
+        # Recent activity (last 5 experiments)
+        recent_experiments = experiments[:5] if experiments else []
+        
+        return {
+            "total_experiments": total,
+            "running_experiments": running,
+            "completed_experiments": completed,
+            "failed_experiments": failed,
+            "recent_experiments": [
+                {
+                    "id": exp.id,
+                    "status": exp.status,
+                    "route_id": exp.route_id,
+                    "created_at": exp.created_at.isoformat(),
+                    "search_method": exp.search_method
+                }
+                for exp in recent_experiments
+            ]
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get experiment summary: {str(e)}"
+        )
+
+
+@router.get("/experiments/count")
+async def get_experiments_count(
+    status_filter: Optional[str] = Query(None),
+    search_method: Optional[str] = Query(None),
+    experiment_service: ExperimentService = Depends(get_experiment_service)
+) -> Dict[str, int]:
+    """
+    Get count of experiments with optional filtering.
+    
+    Returns the count of experiments matching the specified filters.
+    """
+    try:
+        experiments = await experiment_service.list_experiments(
+            limit=10000,  # Large limit to get all
+            status_filter=status_filter,
+            search_method=search_method
+        )
+        
+        return {"count": len(experiments)}
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get experiment count: {str(e)}"
+        )
+
+
+@router.get("/experiments/status-counts")
+async def get_experiments_status_counts(
+    experiment_service: ExperimentService = Depends(get_experiment_service)
+) -> Dict[str, int]:
+    """
+    Get count of experiments by status.
+    
+    Returns the number of experiments in each status.
+    """
+    try:
+        experiments = await experiment_service.list_experiments(limit=10000)
+        
+        status_counts = {}
+        for exp in experiments:
+            status_counts[exp.status] = status_counts.get(exp.status, 0) + 1
+        
+        # Ensure all possible statuses are included
+        for status_enum in ["created", "running", "completed", "failed", "stopped"]:
+            if status_enum not in status_counts:
+                status_counts[status_enum] = 0
+        
+        return status_counts
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get status counts: {str(e)}"
+        )
+
+
 @router.get("/experiments/{experiment_id}", response_model=ExperimentStatus)
 async def get_experiment(
     experiment_id: str,

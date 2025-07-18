@@ -439,14 +439,26 @@ class ScenarioService:
             
         except Exception as e:
             logger.error(f"Error getting scenario statistics: {e}")
-            return ScenarioStatistics(
-                total_routes=0,
-                total_scenarios=0,
-                scenario_types={},
-                parameter_statistics=[],
-                towns=[],
-                route_files=[]
-            )
+            # Return basic statistics anyway
+            try:
+                route_file_infos = await self.list_route_files()
+                return ScenarioStatistics(
+                    total_routes=sum(rf.total_routes for rf in route_file_infos),
+                    total_scenarios=0,
+                    scenario_types={},
+                    parameter_statistics=[],
+                    towns=[],
+                    route_files=[rf.filename for rf in route_file_infos]
+                )
+            except:
+                return ScenarioStatistics(
+                    total_routes=0,
+                    total_scenarios=0,
+                    scenario_types={},
+                    parameter_statistics=[],
+                    towns=[],
+                    route_files=[]
+                )
     
     async def get_fuzzable_parameters(self, route_file: str, route_id: str) -> Optional[List[ParameterInfo]]:
         """

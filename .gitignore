@@ -217,3 +217,40 @@ tmp2/
 *.pdf
 *.csv
 epoch_result.json
+
+# Frontend dependencies and build artifacts
+node_modules/
+src/frontend/node_modules/
+.pnp/
+.pnp.js
+
+# Frontend testing
+coverage/
+.nyc_output/
+
+# Frontend production build
+dist/
+build/
+
+# Frontend misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Frontend logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Frontend IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Frontend environment variables
+.env
+.env.*
+!.env.example

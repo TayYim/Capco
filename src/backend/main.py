@@ -19,6 +19,7 @@ import logging
 from api.routes import experiments, scenarios, configurations, results, files, system
 # from api.websockets import console_logs  # TODO: Fix import path
 from core.config import get_settings
+from core.database import init_db
 
 
 # Configure logging
@@ -31,6 +32,14 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     logger.info("Starting CARLA Fuzzing Framework Backend")
+    
+    # Initialize database
+    try:
+        init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+    
     yield
     # Shutdown
     logger.info("Shutting down CARLA Fuzzing Framework Backend")

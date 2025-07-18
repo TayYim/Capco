@@ -9,6 +9,7 @@ from functools import lru_cache
 from typing import List
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -16,7 +17,7 @@ class Settings(BaseSettings):
     
     # Server configuration
     host: str = Field(default="127.0.0.1", description="Server host")
-    port: int = Field(default=8000, description="Server port")
+    port: int = Field(default=8089, description="Server port")
     debug: bool = Field(default=True, description="Debug mode")
     
     # CORS configuration
@@ -57,7 +58,7 @@ class Settings(BaseSettings):
     
     # Database configuration (optional)
     database_url: str = Field(
-        default="sqlite:///./experiments.db",
+        default="sqlite:///" + str(Path(__file__).parent.parent.parent.parent / "experiments.db"),
         description="Database URL for experiment history"
     )
     

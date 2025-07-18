@@ -58,7 +58,6 @@ class ParameterService:
                 cleanup_after_days=30,
                 enable_headless=True,
                 log_level=settings.log_level,
-                enable_authentication=False,
                 session_timeout=3600
             )
         except Exception as e:
@@ -77,7 +76,6 @@ class ParameterService:
                 cleanup_after_days=30,
                 enable_headless=True,
                 log_level="INFO",
-                enable_authentication=False,
                 session_timeout=3600
             )
     
@@ -164,11 +162,14 @@ class ParameterService:
             except Exception as e:
                 errors.append(f"Output directory not writable: {e}")
             
-            # Check for optional dependencies
+            # Check for optional dependencies (avoid multiprocessing context issues)
             try:
-                import sko
-            except ImportError:
-                warnings.append("scikit-opt not available - PSO and GA search methods disabled")
+                import importlib.util
+                spec = importlib.util.find_spec("sko")
+                if spec is None:
+                    warnings.append("scikit-opt not available - PSO and GA search methods disabled")
+            except Exception:
+                warnings.append("Could not check scikit-opt availability")
             
             is_valid = len(errors) == 0
             
@@ -206,23 +207,26 @@ class ParameterService:
             ranges_data = self._load_parameter_ranges()
             parameter_ranges = []
             
-            # Get default ranges
+            # Handle the current YAML format with parameter_types
+            if "parameter_types" in ranges_data:
+                # Process parameter_types structure
+                for category, params in ranges_data["parameter_types"].items():
+                    for param_name, range_values in params.items():
+                        if isinstance(range_values, list) and len(range_values) >= 2:
+                            parameter_ranges.append(ParameterRange(
+                                parameter_name=param_name,
+                                min_value=float(range_values[0]),
+                                max_value=float(range_values[1]),
+                                default_value=(float(range_values[0]) + float(range_values[1])) / 2,
+                                description=f"{category.title()} parameter {param_name}",
+                                unit="m/s" if category == "velocity" else "m" if category == "position" else "s",
+                                scenario_type=None
+                            ))
+            
+            # Handle legacy default format
             default_ranges = ranges_data.get("default", {})
             for param_name, range_config in default_ranges.items():
-                parameter_ranges.append(ParameterRange(
-                    parameter_name=param_name,
-                    min_value=range_config["min"],
-                    max_value=range_config["max"],
-                    default_value=range_config.get("default"),
-                    description=range_config.get("description"),
-                    unit=range_config.get("unit"),
-                    scenario_type=None
-                ))
-            
-            # Get scenario-specific ranges
-            scenario_overrides = ranges_data.get("scenario_overrides", {})
-            if scenario_type and scenario_type in scenario_overrides:
-                for param_name, range_config in scenario_overrides[scenario_type].items():
+                if isinstance(range_config, dict):
                     parameter_ranges.append(ParameterRange(
                         parameter_name=param_name,
                         min_value=range_config["min"],
@@ -230,21 +234,57 @@ class ParameterService:
                         default_value=range_config.get("default"),
                         description=range_config.get("description"),
                         unit=range_config.get("unit"),
-                        scenario_type=scenario_type
+                        scenario_type=None
                     ))
+            
+            # Get scenario-specific ranges
+            scenario_overrides = ranges_data.get("scenario_overrides", {})
+            if scenario_type and scenario_type in scenario_overrides:
+                for param_name, range_values in scenario_overrides[scenario_type].items():
+                    if isinstance(range_values, list) and len(range_values) >= 2:
+                        parameter_ranges.append(ParameterRange(
+                            parameter_name=param_name,
+                            min_value=float(range_values[0]),
+                            max_value=float(range_values[1]),
+                            default_value=(float(range_values[0]) + float(range_values[1])) / 2,
+                            description=f"Override for {scenario_type} scenario",
+                            unit=None,
+                            scenario_type=scenario_type
+                        ))
+                    elif isinstance(range_values, dict):
+                        parameter_ranges.append(ParameterRange(
+                            parameter_name=param_name,
+                            min_value=range_values["min"],
+                            max_value=range_values["max"],
+                            default_value=range_values.get("default"),
+                            description=range_values.get("description"),
+                            unit=range_values.get("unit"),
+                            scenario_type=scenario_type
+                        ))
             elif not scenario_type:
                 # Include all scenario-specific ranges
                 for st, params in scenario_overrides.items():
-                    for param_name, range_config in params.items():
-                        parameter_ranges.append(ParameterRange(
-                            parameter_name=param_name,
-                            min_value=range_config["min"],
-                            max_value=range_config["max"],
-                            default_value=range_config.get("default"),
-                            description=range_config.get("description"),
-                            unit=range_config.get("unit"),
-                            scenario_type=st
-                        ))
+                    for param_name, range_values in params.items():
+                        if isinstance(range_values, list) and len(range_values) >= 2:
+                            parameter_ranges.append(ParameterRange(
+                                parameter_name=param_name,
+                                min_value=float(range_values[0]),
+                                max_value=float(range_values[1]),
+                                default_value=(float(range_values[0]) + float(range_values[1])) / 2,
+                                description=f"Override for {st} scenario",
+                                unit=None,
+                                scenario_type=st
+                            ))
+                        elif isinstance(range_values, dict):
+                            parameter_ranges.append(ParameterRange(
+                                parameter_name=param_name,
+                                min_value=range_values["min"],
+                                max_value=range_values["max"],
+                                default_value=range_values.get("default"),
+                                description=range_values.get("description"),
+                                unit=range_values.get("unit"),
+                                scenario_type=st
+                            ))
             
             return parameter_ranges
             
@@ -411,12 +451,20 @@ class ParameterService:
                 description="Random search baseline",
                 default_parameters={"iterations": 10},
                 parameter_ranges={"iterations": (1, 1000)},
-                is_available=True
+                is_available=True,
+                requires_library=None
             ))
             
-            # Check for scikit-opt
+            # Check for scikit-opt (handle multiprocessing context issues)
+            sko_available = False
             try:
-                import sko
+                import importlib.util
+                spec = importlib.util.find_spec("sko")
+                sko_available = spec is not None
+            except Exception:
+                sko_available = False
+            
+            if sko_available:
                 search_methods.extend([
                     SearchMethodConfig(
                         name="pso",
@@ -433,7 +481,8 @@ class ParameterService:
                             "c1": (0.1, 2.0),
                             "c2": (0.1, 2.0)
                         },
-                        is_available=True
+                        is_available=True,
+                        requires_library=None
                     ),
                     SearchMethodConfig(
                         name="ga",
@@ -446,10 +495,11 @@ class ParameterService:
                             "pop_size": (10, 200),
                             "prob_mut": (0.01, 0.5)
                         },
-                        is_available=True
+                        is_available=True,
+                        requires_library=None
                     )
                 ])
-            except ImportError:
+            else:
                 search_methods.extend([
                     SearchMethodConfig(
                         name="pso",
