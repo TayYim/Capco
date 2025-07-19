@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from api.routes import experiments, scenarios, configurations, results, files, system
-# from api.websockets import console_logs  # TODO: Fix import path
+from api.websockets import console_logs
 from core.config import get_settings
 from core.database import init_db
 
@@ -74,7 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(system.router, prefix="/api/system", tags=["system"])
     
     # Include WebSocket routes
-    # app.include_router(console_logs.router, prefix="/ws", tags=["websockets"])  # TODO: Fix import path
+    app.include_router(console_logs.router, prefix="/ws", tags=["websockets"])
     
     @app.get("/")
     async def root():

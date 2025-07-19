@@ -19,6 +19,7 @@ import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { apiClient } from '../services/api'
 import type { ExperimentConfig, ExperimentData } from '../types'
+import { LogViewer } from '../components/common/LogViewer'
 import clsx from 'clsx'
 
 // Form validation schema
@@ -343,6 +344,15 @@ export function ExperimentPage() {
       {/* Status Card (for existing experiments) */}
       {isEditing && experiment && (
         <ExperimentStatus experiment={experiment} />
+      )}
+
+      {/* Real-time Logs (for existing experiments) */}
+      {isEditing && experiment && (
+        <LogViewer 
+          experimentId={experiment.id} 
+          isRunning={experiment.status === 'running'}
+          experimentStatus={experiment.status}
+        />
       )}
 
       {/* Configuration Form */}

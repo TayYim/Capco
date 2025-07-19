@@ -21,6 +21,14 @@ import time
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from utils.carla_cleanup import full_carla_cleanup
 
+# Import WebSocket broadcasting for real-time logs
+try:
+    from api.websockets.console_logs import broadcast_log_message
+except ImportError:
+    # Fallback if WebSocket module not available
+    async def broadcast_log_message(experiment_id: str, message: str, level: str = "INFO"):
+        pass
+
 from models.experiment import (
     ExperimentConfig, ExperimentStatus, ExperimentResult,
     ExperimentListItem, ExperimentUpdate, ProgressInfo,
@@ -762,16 +770,44 @@ class ExperimentService:
                 
                 line_str = line.decode().strip()
                 if line_str:  # Only log non-empty lines
-                    if stream_name == "stderr":
+                    # Determine log level based on content, not stream
+                    log_level = "INFO"  # Default to INFO for all streams
+                    
+                    # Check for specific patterns to set appropriate log level
+                    line_lower = line_str.lower()
+                    if any(word in line_lower for word in ["collision", "found"]):
+                        log_level = "SUCCESS" 
+                    elif any(word in line_lower for word in ["error", "failed", "exception"]):
+                        log_level = "ERROR"
+                    elif any(word in line_lower for word in ["warning", "warn"]):
+                        log_level = "WARNING"
+                    elif "iteration" in line_lower:
+                        log_level = "INFO"
+                    
+                    # Log to console with appropriate level
+                    if log_level == "ERROR":
                         logger.error(f"Experiment {experiment_id} [{stream_name}]: {line_str}")
+                    elif log_level == "WARNING":
+                        logger.warning(f"Experiment {experiment_id} [{stream_name}]: {line_str}")
                     else:
                         logger.info(f"Experiment {experiment_id} [{stream_name}]: {line_str}")
+                    
+                    # Broadcast to WebSocket clients in real-time
+                    try:
+                        await broadcast_log_message(experiment_id, line_str, log_level)
+                    except Exception as ws_error:
+                        logger.warning(f"Failed to broadcast log message: {ws_error}")
                     
                     # Parse progress information from output
                     await self._parse_progress_info(experiment_id, line_str)
                         
         except Exception as e:
             logger.error(f"Error reading {stream_name} for experiment {experiment_id}: {e}")
+            # Also broadcast the error
+            try:
+                await broadcast_log_message(experiment_id, f"Error reading {stream_name}: {e}", "ERROR")
+            except Exception:
+                pass
     
     async def _parse_progress_info(self, experiment_id: str, line_str: str):
         """Parse progress information from subprocess output."""

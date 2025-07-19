@@ -18,6 +18,76 @@ from models.experiment import (
 )
 from models.api import PaginatedResponse
 from services.experiment_service import ExperimentService, get_experiment_service
+# Simple inline log reading functionality to avoid import issues
+import aiofiles
+from pathlib import Path
+import re
+
+async def get_experiment_logs_simple(experiment_id: str, lines: int = 100, experiment_service = None):
+    """Simple function to get experiment logs without complex imports."""
+    try:
+        # Try to find log files for the experiment
+        output_base = Path("../..") / "output" 
+        possible_log_paths = [
+            output_base / f"experiment_{experiment_id}" / "fuzzing.log",
+            output_base / experiment_id / "fuzzing.log",
+        ]
+        
+        # Also search for fuzzing directories that might contain logs
+        import glob
+        fuzzing_patterns = [
+            output_base / "fuzzing_*" / "fuzzing.log",
+        ]
+        
+        log_file = None
+        
+        # First try direct experiment directories
+        for pattern in possible_log_paths:
+            if pattern.exists():
+                log_file = pattern
+                break
+        
+        # For completed experiments, try to find logs in fuzzing directories
+        if not log_file and experiment_service:
+            try:
+                experiment = await experiment_service.get_experiment(experiment_id)
+                if experiment and experiment.status in ["completed", "failed"]:
+                    # Get the most recent fuzzing directory with logs
+                    fuzzing_logs = list(output_base.glob("fuzzing_*/fuzzing.log"))
+                    if fuzzing_logs:
+                        # Sort by modification time and find the most recent
+                        log_file = max(fuzzing_logs, key=lambda f: f.stat().st_mtime)
+            except Exception:
+                pass  # If anything fails, just return empty logs
+        
+        if not log_file:
+            return []  # No log file found for this specific experiment
+        
+        # Read recent lines from log file
+        logs = []
+        if log_file.exists():
+            async with aiofiles.open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+                all_lines = await f.readlines()
+                start_index = max(0, len(all_lines) - lines)
+                
+                for line in all_lines[start_index:]:
+                    line = line.strip()
+                    if line:
+                        # Simple log level detection based on content
+                        level = "INFO"  # Default to INFO
+                        line_lower = line.lower()
+                        if any(word in line_lower for word in ["error", "failed", "exception"]):
+                            level = "ERROR"
+                        elif any(word in line_lower for word in ["warning", "warn"]):
+                            level = "WARNING"
+                        elif any(word in line_lower for word in ["collision", "found"]):
+                            level = "SUCCESS"
+                        
+                        logs.append((line, level))
+        
+        return logs
+    except Exception as e:
+        return [("Error reading logs: " + str(e), "ERROR")]
 # No authentication needed for prototype
 
 router = APIRouter()
@@ -450,13 +520,35 @@ async def get_experiment_logs(
     Returns recent log entries for the specified experiment.
     """
     try:
-        # TODO: Implement log retrieval functionality
+        # Check if experiment exists
+        experiment = await experiment_service.get_experiment(experiment_id)
+        if not experiment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Experiment {experiment_id} not found"
+            )
+        
+        # Get recent logs using simple log reading
+        log_entries = await get_experiment_logs_simple(experiment_id, lines, experiment_service)
+        
+        # Format logs for response
+        formatted_logs = []
+        for log_line, log_level in log_entries:
+            formatted_logs.append({
+                "message": log_line,
+                "level": log_level,
+                "timestamp": None  # Simple implementation doesn't extract timestamps
+            })
+        
         return {
             "experiment_id": experiment_id,
-            "logs": ["Log functionality not yet implemented"],
-            "lines_returned": 1
+            "logs": formatted_logs,
+            "lines_returned": len(formatted_logs),
+            "total_lines_requested": lines
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -15,7 +15,89 @@ from pathlib import Path
 # Add the backend directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from utils.log_streamer import LogStreamer, get_log_streamer
+# Simple log streaming functionality to avoid import issues
+import aiofiles
+import asyncio
+from pathlib import Path
+
+# Store active log streaming tasks
+active_log_tasks = {}
+
+async def simple_log_streaming(experiment_id: str):
+    """Simple log streaming function."""
+    try:
+        # Try to find log file for the experiment
+        output_base = Path("../../..") / "output" 
+        possible_log_paths = [
+            output_base / f"experiment_{experiment_id}" / "fuzzing.log",
+            output_base / experiment_id / "fuzzing.log",
+        ]
+        
+        log_file = None
+        
+        # First try direct experiment directories
+        for pattern in possible_log_paths:
+            if pattern.exists():
+                log_file = pattern
+                break
+        
+        if not log_file:
+            await manager.broadcast_log("No log file found for experiment", experiment_id, "INFO")
+            return
+        
+        # Start monitoring from the end of the file
+        last_position = log_file.stat().st_size if log_file.exists() else 0
+        
+        while True:
+            try:
+                if not log_file.exists():
+                    await asyncio.sleep(1)
+                    continue
+                
+                current_size = log_file.stat().st_size
+                
+                if current_size > last_position:
+                    # File has grown, read new content
+                    async with aiofiles.open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+                        await f.seek(last_position)
+                        new_content = await f.read()
+                        
+                        if new_content:
+                            # Process new lines
+                            lines = new_content.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line:
+                                    # Simple log level detection based on content
+                                    level = "INFO"  # Default to INFO
+                                    line_lower = line.lower()
+                                    if any(word in line_lower for word in ["error", "failed", "exception"]):
+                                        level = "ERROR"
+                                    elif any(word in line_lower for word in ["warning", "warn"]):
+                                        level = "WARNING"
+                                    elif any(word in line_lower for word in ["collision", "found"]):
+                                        level = "SUCCESS"
+                                    
+                                    await manager.broadcast_log(line, experiment_id, level)
+                            
+                            last_position = current_size
+                
+                elif current_size < last_position:
+                    # File was truncated, start from beginning
+                    last_position = 0
+                    await manager.broadcast_log("Log file was rotated", experiment_id, "INFO")
+                
+                # Wait before checking again
+                await asyncio.sleep(0.5)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                await manager.broadcast_log(f"Error monitoring log: {str(e)}", experiment_id, "ERROR")
+                await asyncio.sleep(2)
+                
+    except Exception as e:
+        await manager.broadcast_log(f"Fatal error streaming logs: {str(e)}", experiment_id, "ERROR")
 # No authentication needed for prototype
 
 router = APIRouter()
@@ -92,8 +174,7 @@ manager = ConnectionManager()
 @router.websocket("/console/{experiment_id}")
 async def websocket_console_logs(
     websocket: WebSocket,
-    experiment_id: str,
-    log_streamer: LogStreamer = Depends(get_log_streamer)
+    experiment_id: str
 ):
     """
     WebSocket endpoint for streaming console logs.
@@ -113,9 +194,8 @@ async def websocket_console_logs(
         }))
         
         # Start log streaming for this experiment
-        asyncio.create_task(
-            stream_logs_for_experiment(experiment_id, log_streamer)
-        )
+        task = asyncio.create_task(simple_log_streaming(experiment_id))
+        active_log_tasks[experiment_id] = task
         
         # Keep connection alive and handle client messages
         while True:
@@ -189,15 +269,15 @@ async def websocket_progress_updates(
         manager.disconnect(websocket, f"{experiment_id}_progress")
 
 
-async def stream_logs_for_experiment(experiment_id: str, log_streamer: LogStreamer):
+async def stream_logs_for_experiment(experiment_id: str):
     """
     Stream logs for a specific experiment.
     
     Monitors log files and streams new content to connected WebSocket clients.
     """
     try:
-        async for log_line, log_level in log_streamer.stream_experiment_logs(experiment_id):
-            await manager.broadcast_log(log_line, experiment_id, log_level)
+        # Use the simple log streaming function
+        await simple_log_streaming(experiment_id)
     except Exception as e:
         # Send error message to connected clients
         await manager.broadcast_log(
