@@ -32,6 +32,7 @@ class ExperimentRecord(Base):
     __tablename__ = "experiments"
     
     id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)  # Human-readable experiment name
     route_id = Column(String, nullable=False)
     route_file = Column(String, nullable=False)
     search_method = Column(String, nullable=False)
@@ -41,11 +42,25 @@ class ExperimentRecord(Base):
     random_seed = Column(Integer, default=42)
     reward_function = Column(String, default="ttc")
     
+    # Method-specific parameters
+    pso_pop_size = Column(Integer, nullable=True)
+    pso_w = Column(Float, nullable=True)
+    pso_c1 = Column(Float, nullable=True)
+    pso_c2 = Column(Float, nullable=True)
+    ga_pop_size = Column(Integer, nullable=True)
+    ga_prob_mut = Column(Float, nullable=True)
+    
     # Status and timing
     status = Column(String, default="created")  # created, running, completed, failed, stopped
     created_at = Column(DateTime, default=func.now())
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    
+    # Enhanced progress tracking
+    current_iteration = Column(Integer, default=0)
+    scenarios_executed = Column(Integer, default=0)
+    total_scenarios = Column(Integer, nullable=True)
+    scenarios_this_iteration = Column(Integer, default=0)
     
     # Results
     best_reward = Column(Float, nullable=True)
@@ -80,6 +95,7 @@ def init_db():
 # Database utility functions
 def save_experiment_record(
     experiment_id: str,
+    name: str,
     route_id: str,
     route_file: str,
     search_method: str,
@@ -90,6 +106,7 @@ def save_experiment_record(
     try:
         record = ExperimentRecord(
             id=experiment_id,
+            name=name,
             route_id=route_id,
             route_file=route_file,
             search_method=search_method,

@@ -247,14 +247,14 @@ class ScenarioService:
             
             # Validate search method parameters
             if config.search_method == "pso":
-                if not config.pso_pop_size or config.pso_pop_size < 5:
-                    warnings.append("PSO population size should be at least 5")
+                if not config.pso_pop_size or config.pso_pop_size < 1:
+                    warnings.append("PSO population size should be at least 1")
                 if not config.pso_w or config.pso_w <= 0:
                     errors.append("PSO inertia weight must be positive")
             
             elif config.search_method == "ga":
-                if not config.ga_pop_size or config.ga_pop_size < 10:
-                    warnings.append("GA population size should be at least 10")
+                if not config.ga_pop_size or config.ga_pop_size < 1:
+                    warnings.append("GA population size should be at least 1")
                 if not config.ga_prob_mut or config.ga_prob_mut <= 0:
                     errors.append("GA mutation probability must be positive")
             

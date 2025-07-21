@@ -8,6 +8,7 @@ export type SearchMethod = 'random' | 'pso' | 'ga'
 export type RewardFunction = 'collision' | 'distance' | 'safety_margin' | 'ttc' | 'ttc_div_dist' | 'weighted_multi'
 
 export interface ExperimentConfig {
+  name: string
   route_id: string
   route_file: string
   search_method: SearchMethod
@@ -28,17 +29,34 @@ export interface ExperimentConfig {
 }
 
 export interface ProgressInfo {
+  // Optimization-level tracking (PSO/GA iterations)
   current_iteration: number
   total_iterations: number
+  
+  // Scenario-level tracking (actual CARLA simulations)
+  scenarios_executed: number
+  total_scenarios: number
+  scenarios_this_iteration: number
+  
+  // Results tracking
   best_reward?: number
   collision_found: boolean
   elapsed_time?: number
   estimated_remaining?: number
   recent_rewards: number[]
+  
+  // Method-specific information
+  search_method: string
+  population_size?: number
+  
+  // Computed progress percentages (from backend properties)
+  iteration_progress_percentage?: number
+  scenario_progress_percentage?: number
 }
 
 export interface ExperimentData {
   id: string
+  name: string
   status: ExperimentStatus
   config: ExperimentConfig
   progress?: ProgressInfo
@@ -80,6 +98,7 @@ export interface ExperimentResult {
 
 export interface ExperimentListItem {
   id: string
+  name: string
   route_id: string
   route_file: string
   search_method: string

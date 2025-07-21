@@ -16,10 +16,82 @@ import logging
 import subprocess
 import sys
 import time
+import math
 
-# Add path for utilities
+# Add path for utilities  
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from utils.carla_cleanup import full_carla_cleanup
+
+# Name generator functions (inline to avoid import issues)
+import random
+
+def generate_experiment_name(style: str = "animal") -> str:
+    """Generate a random experiment name."""
+    adjectives = [
+        "Agile", "Bold", "Clever", "Dynamic", "Elegant", "Fast", "Graceful", "Heavy",
+        "Intelligent", "Jolly", "Keen", "Lightning", "Mighty", "Noble", "Optimized",
+        "Precise", "Quick", "Robust", "Swift", "Turbulent", "Ultra", "Vibrant",
+        "Wild", "Youthful", "Zealous", "Active", "Brave", "Careful", "Daring", "Epic"
+    ]
+    animals = [
+        "Falcon", "Tiger", "Eagle", "Wolf", "Lion", "Shark", "Panther", "Cheetah",
+        "Hawk", "Bear", "Fox", "Lynx", "Jaguar", "Leopard", "Raven", "Phoenix",
+        "Dragon", "Griffin", "Viper", "Cobra", "Stallion", "Mustang", "Bronco"
+    ]
+    tech_adjectives = [
+        "Quantum", "Neural", "Binary", "Digital", "Cyber", "Virtual", "Matrix",
+        "Nano", "Micro", "Mega", "Turbo", "Hyper", "Ultra", "Meta", "Proto"
+    ]
+    objects = [
+        "Quest", "Mission", "Trial", "Test", "Probe", "Scan", "Search", "Hunt",
+        "Explorer", "Finder", "Seeker", "Scout", "Tracker", "Analyzer", "Monitor"
+    ]
+    
+    if style == "tech":
+        return f"{random.choice(tech_adjectives)} {random.choice(objects)}"
+    elif style == "mixed":
+        if random.random() < 0.7:
+            return f"{random.choice(adjectives)} {random.choice(animals)}"
+        else:
+            return f"{random.choice(tech_adjectives)} {random.choice(objects)}"
+    else:
+        return f"{random.choice(adjectives)} {random.choice(animals)}"
+
+def generate_unique_name(existing_names: set[str] | None = None, style: str = "animal", max_attempts: int = 100) -> str:
+    """Generate a unique experiment name not in the existing set."""
+    if existing_names is None:
+        existing_names = set()
+    
+    for _ in range(max_attempts):
+        name = generate_experiment_name(style)
+        if name not in existing_names:
+            return name
+    
+    # If we can't find a unique name, add a number suffix
+    base_name = generate_experiment_name(style)
+    counter = 1
+    while f"{base_name} #{counter}" in existing_names:
+        counter += 1
+    
+    return f"{base_name} #{counter}"
+
+def validate_experiment_name(name: str) -> tuple[bool, str]:
+    """Validate an experiment name."""
+    if not name or not name.strip():
+        return False, "Name cannot be empty"
+    
+    if len(name.strip()) < 2:
+        return False, "Name must be at least 2 characters long"
+    
+    if len(name.strip()) > 100:
+        return False, "Name must be less than 100 characters"
+    
+    # Check for invalid characters (basic validation)
+    invalid_chars = set('<>:"/\\|?*')
+    if any(char in name for char in invalid_chars):
+        return False, f"Name cannot contain these characters: {' '.join(invalid_chars)}"
+    
+    return True, ""
 
 # Import WebSocket broadcasting for real-time logs
 try:
@@ -44,6 +116,29 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
+def sanitize_float_value(value: Any) -> Optional[float]:
+    """
+    Sanitize float values to be JSON-compliant.
+    
+    Args:
+        value: The value to sanitize
+        
+    Returns:
+        Sanitized float value or None if invalid
+    """
+    if value is None:
+        return None
+    
+    try:
+        float_val = float(value)
+        # Check for infinity or NaN values
+        if math.isinf(float_val) or math.isnan(float_val):
+            return None
+        return float_val
+    except (ValueError, TypeError):
+        return None
+
+
 class ExperimentService:
     """Service for managing fuzzing experiments."""
     
@@ -54,6 +149,59 @@ class ExperimentService:
         self._actual_output_dirs: Dict[str, str] = {}
         # Load existing experiments from database on startup
         self._load_experiments_from_database()
+    
+    def _calculate_total_scenarios(self, search_method: str, iterations: int, population_size: int = None) -> int:
+        """Calculate total number of scenarios to be executed."""
+        if search_method == 'random':
+            return iterations
+        elif search_method in ['pso', 'ga']:
+            if population_size is None:
+                # Default population sizes
+                population_size = 20 if search_method == 'pso' else 30
+            return iterations * population_size
+        return iterations
+    
+    def _get_population_size_from_config(self, config: dict) -> int:
+        """Extract population size from experiment configuration."""
+        search_method = config.get('search_method', 'random')
+        if search_method == 'pso':
+            return config.get('pso_pop_size', 20)
+        elif search_method == 'ga':
+            return config.get('ga_pop_size', 30)
+        return 1  # For random method
+    
+    def _create_progress_from_database_record(self, record) -> Optional[dict]:
+        """Create progress dictionary from database record."""
+        if not record:
+            return None
+            
+        search_method = getattr(record, 'search_method', 'random')
+        num_iterations = getattr(record, 'num_iterations', 10)
+        
+        # Get population size from record or defaults
+        population_size = None
+        if search_method == 'pso':
+            population_size = getattr(record, 'pso_pop_size', 20)
+        elif search_method == 'ga':
+            population_size = getattr(record, 'ga_pop_size', 30)
+        
+        # Calculate total scenarios
+        total_scenarios = self._calculate_total_scenarios(search_method, num_iterations, population_size)
+        
+        return {
+            "current_iteration": getattr(record, 'current_iteration', 0),
+            "total_iterations": num_iterations,
+            "scenarios_executed": getattr(record, 'scenarios_executed', 0),
+            "total_scenarios": total_scenarios,
+            "scenarios_this_iteration": getattr(record, 'scenarios_this_iteration', 0),
+            "best_reward": sanitize_float_value(getattr(record, 'best_reward', None)),
+            "collision_found": getattr(record, 'collision_found', False) or False,
+            "elapsed_time": None,  # Runtime-only data
+            "estimated_remaining": None,  # Runtime-only data
+            "recent_rewards": [],  # Runtime-only data
+            "search_method": search_method,
+            "population_size": population_size if search_method != 'random' else None
+        }
     
     def _load_experiments_from_database(self):
         """Load existing experiments from database to preserve history across restarts."""
@@ -71,11 +219,19 @@ class ExperimentService:
                 started_at = getattr(record, 'started_at', None)
                 completed_at = getattr(record, 'completed_at', None)
                 
+                # Get experiment name (with fallback for legacy experiments)
+                experiment_name = getattr(record, 'name', None)
+                if not experiment_name:
+                    # Generate a name for legacy experiments without names
+                    experiment_name = f"Legacy Experiment {record_id[:8]}"
+                
                 # Convert database record to experiment status dictionary
                 experiment_status = {
                     "id": record_id,
+                    "name": experiment_name,
                     "status": getattr(record, 'status', 'created'),
                     "config": {
+                        "name": experiment_name,
                         "route_id": getattr(record, 'route_id', ''),
                         "route_file": getattr(record, 'route_file', ''),
                         "search_method": getattr(record, 'search_method', 'random'),
@@ -90,15 +246,7 @@ class ExperimentService:
                     "completed_at": completed_at.isoformat() if completed_at else None,
                     "error_message": getattr(record, 'error_message', None),
                     "output_directory": getattr(record, 'output_directory', None),
-                    "progress": {
-                        "current_iteration": 0,  # This will be updated during runtime
-                        "total_iterations": getattr(record, 'num_iterations', 10),
-                        "best_reward": getattr(record, 'best_reward', None),
-                        "collision_found": getattr(record, 'collision_found', False) or False,
-                        "elapsed_time": None,
-                        "estimated_remaining": None,
-                        "recent_rewards": []
-                    } if getattr(record, 'best_reward', None) is not None or getattr(record, 'collision_found', False) else None
+                    "progress": self._create_progress_from_database_record(record)
                 }
                 
                 self.experiment_status[record_id] = experiment_status
@@ -125,14 +273,50 @@ class ExperimentService:
         experiment_id = str(uuid.uuid4())
         timestamp = datetime.now()
         
+        # Validate and ensure unique experiment name
+        is_valid, error_message = validate_experiment_name(config.name)
+        if not is_valid:
+            raise ValueError(f"Invalid experiment name: {error_message}")
+        
+        # Get existing names to ensure uniqueness
+        existing_names = set()
+        for exp_data in self.experiment_status.values():
+            if exp_data and exp_data.get("config") and exp_data["config"].get("name"):
+                existing_names.add(exp_data["config"]["name"])
+        
+        # Generate unique name if the provided name already exists
+        final_name = config.name
+        if final_name in existing_names:
+            final_name = generate_unique_name(existing_names, style="mixed")
+            logger.info(f"Name '{config.name}' already exists, using '{final_name}' instead")
+        
+        # Update config with final name
+        config.name = final_name
+        
         # Create output directory
         output_dir = Path(settings.output_dir) / f"experiment_{experiment_id}"
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Save to database
         try:
+            # Prepare method-specific parameters for database
+            db_params = {}
+            if config.search_method.value == 'pso':
+                db_params.update({
+                    'pso_pop_size': getattr(config, 'pso_pop_size', 20),
+                    'pso_w': getattr(config, 'pso_w', 0.8),
+                    'pso_c1': getattr(config, 'pso_c1', 0.5),
+                    'pso_c2': getattr(config, 'pso_c2', 0.5)
+                })
+            elif config.search_method.value == 'ga':
+                db_params.update({
+                    'ga_pop_size': getattr(config, 'ga_pop_size', 30),
+                    'ga_prob_mut': getattr(config, 'ga_prob_mut', 0.1)
+                })
+            
             save_experiment_record(
                 experiment_id=experiment_id,
+                name=final_name,
                 route_id=config.route_id,
                 route_file=config.route_file,
                 search_method=config.search_method.value,
@@ -141,18 +325,44 @@ class ExperimentService:
                 headless=config.headless,
                 random_seed=config.random_seed,
                 reward_function=config.reward_function.value,
-                output_directory=str(output_dir)
+                output_directory=str(output_dir),
+                **db_params
             )
         except Exception as e:
             logger.error(f"Failed to save experiment record: {e}")
             # Continue without database record for now
         
+        # Calculate enhanced progress tracking
+        population_size = self._get_population_size_from_config(config.dict())
+        total_scenarios = self._calculate_total_scenarios(
+            config.search_method.value, 
+            config.num_iterations, 
+            population_size
+        )
+        
+        # Create enhanced progress tracking
+        progress_info = ProgressInfo(
+            current_iteration=0,
+            total_iterations=config.num_iterations,
+            scenarios_executed=0,
+            total_scenarios=total_scenarios,
+            scenarios_this_iteration=0,
+            best_reward=None,
+            collision_found=False,
+            elapsed_time=None,
+            estimated_remaining=None,
+            recent_rewards=[],
+            search_method=config.search_method.value,
+            population_size=population_size if config.search_method.value != 'random' else None
+        )
+
         # Create experiment status
         experiment_status = ExperimentStatus(
             id=experiment_id,
+            name=final_name,
             status=ExperimentStatusEnum.CREATED,
             config=config,
-            progress=None,
+            progress=progress_info,
             created_at=timestamp,
             started_at=None,
             completed_at=None,
@@ -311,6 +521,7 @@ class ExperimentService:
             
             experiments.append(ExperimentListItem(
                 id=exp_id,
+                name=status_dict.get("name", config.get("name", f"Experiment {exp_id[:8]}")),
                 status=status_enum,
                 route_id=config.get("route_id", "unknown"),
                 route_file=config.get("route_file", "unknown"),
@@ -318,7 +529,7 @@ class ExperimentService:
                 created_at=created_at,
                 completed_at=completed_at,
                 collision_found=progress.get("collision_found", False),
-                best_reward=progress.get("best_reward", 0.0),
+                best_reward=sanitize_float_value(progress.get("best_reward", None)),
                 total_iterations=progress.get("current_iteration", 0)
             ))
         
@@ -420,8 +631,19 @@ class ExperimentService:
         # Create new experiment with same config
         from models.experiment import ExperimentConfig, SearchMethodEnum, RewardFunctionEnum
         
+        # Generate new name for the duplicated experiment
+        original_name = original_config.get("name", "Unnamed Experiment")
+        existing_names = set()
+        for exp_data in self.experiment_status.values():
+            if exp_data and exp_data.get("config") and exp_data["config"].get("name"):
+                existing_names.add(exp_data["config"]["name"])
+        
+        # Generate unique name based on original
+        new_name = generate_unique_name(existing_names, style="mixed")
+        
         # Convert config dict back to ExperimentConfig object
         config = ExperimentConfig(
+            name=new_name,
             route_id=original_config.get("route_id", ""),
             route_file=original_config.get("route_file", ""),
             search_method=SearchMethodEnum(original_config.get("search_method", "random")),
@@ -575,6 +797,24 @@ class ExperimentService:
                 "--reward-function", config_dict["reward_function"]
             ]
             
+            # Add PSO parameters if using PSO method
+            if config_dict["search_method"] == "pso":
+                if "pso_pop_size" in config_dict:
+                    cmd.extend(["--pso-pop-size", str(config_dict["pso_pop_size"])])
+                if "pso_w" in config_dict:
+                    cmd.extend(["--pso-w", str(config_dict["pso_w"])])
+                if "pso_c1" in config_dict:
+                    cmd.extend(["--pso-c1", str(config_dict["pso_c1"])])
+                if "pso_c2" in config_dict:
+                    cmd.extend(["--pso-c2", str(config_dict["pso_c2"])])
+            
+            # Add GA parameters if using GA method
+            elif config_dict["search_method"] == "ga":
+                if "ga_pop_size" in config_dict:
+                    cmd.extend(["--ga-pop-size", str(config_dict["ga_pop_size"])])
+                if "ga_prob_mut" in config_dict:
+                    cmd.extend(["--ga-prob-mut", str(config_dict["ga_prob_mut"])])
+            
             if config_dict["headless"]:
                 cmd.append("--headless")
             
@@ -695,7 +935,11 @@ class ExperimentService:
                     try:
                         with open(results_file, 'r') as f:
                             results_data = json.load(f)
-                            best_reward = results_data.get("best_reward", best_reward)
+                            file_best_reward = results_data.get("best_reward", best_reward)
+                            # Sanitize the reward value from file
+                            sanitized_reward = sanitize_float_value(file_best_reward)
+                            if sanitized_reward is not None:
+                                best_reward = sanitized_reward
                             collision_found = results_data.get("collision_found", collision_found)
                             has_results = True
                             logger.info(f"Loaded results from {results_file}: best_reward={best_reward}, collision_found={collision_found}")
@@ -773,16 +1017,16 @@ class ExperimentService:
                     # Determine log level based on content, not stream
                     log_level = "INFO"  # Default to INFO for all streams
                     
+                    # Check for [Progress] logs first
+                    if '[Progress]' in line_str:
+                        log_level = "PROGRESS"
                     # Check for specific patterns to set appropriate log level
-                    line_lower = line_str.lower()
-                    if any(word in line_lower for word in ["collision", "found"]):
+                    elif any(word in line_str.lower() for word in ["collision", "found"]):
                         log_level = "SUCCESS" 
-                    elif any(word in line_lower for word in ["error", "failed", "exception"]):
+                    elif any(word in line_str.lower() for word in ["error", "failed", "exception"]):
                         log_level = "ERROR"
-                    elif any(word in line_lower for word in ["warning", "warn"]):
+                    elif any(word in line_str.lower() for word in ["warning", "warn"]):
                         log_level = "WARNING"
-                    elif "iteration" in line_lower:
-                        log_level = "INFO"
                     
                     # Log to console with appropriate level
                     if log_level == "ERROR":
@@ -810,62 +1054,277 @@ class ExperimentService:
                 pass
     
     async def _parse_progress_info(self, experiment_id: str, line_str: str):
-        """Parse progress information from subprocess output."""
+        """Parse progress information from [Progress] prefixed logs."""
         try:
-            best_reward = None
-            collision_found = False
-            current_iteration = 0
+            # Look for [Progress] anywhere in the line, not just at the start
+            if '[Progress]' not in line_str:
+                # Still handle non-progress log patterns for backward compatibility
+                await self._parse_legacy_patterns(experiment_id, line_str)
+                return
             
-            # Parse various patterns from sim_runner.py output
+            # Extract the progress message by finding [Progress] and taking everything after it
+            progress_start = line_str.find('[Progress]')
+            if progress_start == -1:
+                return
+                
+            # Extract everything after "[Progress] "
+            progress_message = line_str[progress_start + 10:].strip()  # +10 for len('[Progress]')
+            
+            if not progress_message:
+                return
+            
+            if experiment_id not in self.experiment_status:
+                return
+                
+            config = self.experiment_status[experiment_id].get("config", {})
+            search_method = config.get("search_method", "random")
+            
+            # Get population size for PSO/GA methods
+            population_size = None
+            if search_method == "pso":
+                population_size = config.get("pso_pop_size", 20)
+            elif search_method == "ga":
+                population_size = config.get("ga_pop_size", 30)
+            else:
+                population_size = 1  # Random method
+            
+            # Use async lock to prevent concurrent modification
+            if experiment_id not in self._status_locks:
+                self._status_locks[experiment_id] = asyncio.Lock()
+            
+            async with self._status_locks[experiment_id]:
+                # Initialize progress structure if needed
+                if ("progress" not in self.experiment_status[experiment_id] or 
+                    self.experiment_status[experiment_id]["progress"] is None):
+                    num_iterations = config.get("num_iterations", 10)
+                    total_scenarios = self._calculate_total_scenarios(search_method, num_iterations, population_size)
+                    
+                    self.experiment_status[experiment_id]["progress"] = {
+                        "current_iteration": 0,
+                        "total_iterations": num_iterations,
+                        "scenarios_executed": 0,
+                        "total_scenarios": total_scenarios,
+                        "scenarios_this_iteration": 0,
+                        "best_reward": None,
+                        "collision_found": False,
+                        "elapsed_time": None,
+                        "estimated_remaining": None,
+                        "recent_rewards": [],
+                        "search_method": search_method,
+                        "population_size": population_size if search_method != 'random' else None
+                    }
+                
+                progress = self.experiment_status[experiment_id]["progress"]
+                updated = False
+                
+                # Parse different types of progress messages
+                message_lower = progress_message.lower()
+                
+                # Pattern 1: "Total iterations: X"
+                if message_lower.startswith("total iterations:"):
+                    try:
+                        total_iterations = int(progress_message.split(":")[1].strip())
+                        progress["total_iterations"] = total_iterations
+                        # Recalculate total scenarios with the confirmed iteration count
+                        total_scenarios = self._calculate_total_scenarios(search_method, total_iterations, population_size)
+                        progress["total_scenarios"] = total_scenarios
+                        logger.info(f"Updated total iterations for {experiment_id}: {total_iterations}, total scenarios: {total_scenarios}")
+                        updated = True
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse total iterations from: {progress_message} - {e}")
+                
+                # Pattern 2: "Start iteration X"
+                elif message_lower.startswith("start iteration"):
+                    try:
+                        iteration_num = int(progress_message.split()[-1])
+                        progress["current_iteration"] = iteration_num
+                        
+                        # Reset scenarios count for this iteration
+                        if search_method != "random":
+                            progress["scenarios_this_iteration"] = 0
+                        
+                        logger.info(f"Started iteration {iteration_num} for {experiment_id}")
+                        updated = True
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse start iteration from: {progress_message} - {e}")
+                
+                # Pattern 3: "Start scenario execution X, iteration Y/Z"
+                elif message_lower.startswith("start scenario execution"):
+                    try:
+                        # Parse: "Start scenario execution 5, iteration 2/10"
+                        parts = progress_message.split(",")
+                        scenario_part = parts[0].strip()
+                        iteration_part = parts[1].strip() if len(parts) > 1 else ""
+                        
+                        # Extract scenario number
+                        scenario_num = int(scenario_part.split()[-1])
+                        
+                        # Extract iteration info if available
+                        if "iteration" in iteration_part:
+                            iter_info = iteration_part.split()[-1]  # "2/10"
+                            if "/" in iter_info:
+                                current_iter, total_iter = iter_info.split("/")
+                                progress["current_iteration"] = int(current_iter)
+                        
+                        logger.debug(f"Started scenario {scenario_num} for {experiment_id}")
+                        # Note: We don't increment counters here, wait for completion
+                        
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse start scenario from: {progress_message} - {e}")
+                
+                # Pattern 4: "End scenario execution X, iteration Y/Z"
+                elif message_lower.startswith("end scenario execution"):
+                    try:
+                        # One scenario completed - increment counters
+                        progress["scenarios_executed"] += 1
+                        
+                        if search_method != "random":
+                            progress["scenarios_this_iteration"] += 1
+                            # Ensure we don't exceed population size for current iteration
+                            if progress["scenarios_this_iteration"] > population_size:
+                                progress["scenarios_this_iteration"] = population_size
+                        else:
+                            # For random search, scenarios_this_iteration is always 1
+                            progress["scenarios_this_iteration"] = 1
+                        
+                        logger.info(f"Completed scenario for {experiment_id}: total {progress['scenarios_executed']}/{progress['total_scenarios']}")
+                        updated = True
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to parse end scenario from: {progress_message} - {e}")
+                
+                # Pattern 5: "Reward: X.XXXXXX"
+                elif message_lower.startswith("reward:"):
+                    try:
+                        reward_value = float(progress_message.split(":")[1].strip())
+                        sanitized_reward = sanitize_float_value(reward_value)
+                        
+                        if sanitized_reward is not None:
+                            # Update best reward if this is better (lower is better)
+                            if (progress["best_reward"] is None or 
+                                sanitized_reward < progress["best_reward"]):
+                                progress["best_reward"] = sanitized_reward
+                                logger.info(f"New best reward for {experiment_id}: {sanitized_reward}")
+                            
+                            # Add to recent rewards (keep last 10)
+                            recent_rewards = progress.get("recent_rewards", [])
+                            recent_rewards.append(sanitized_reward)
+                            progress["recent_rewards"] = recent_rewards[-10:]  # Keep last 10
+                            
+                            # Check for collision (reward of 0.0 typically indicates collision)
+                            if sanitized_reward == 0.0:
+                                progress["collision_found"] = True
+                                logger.info(f"Collision detected from reward for {experiment_id}")
+                            
+                            updated = True
+                            
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse reward from: {progress_message} - {e}")
+                
+                # Pattern 6: "Scenario executed: X"
+                elif message_lower.startswith("scenario executed:"):
+                    try:
+                        scenarios_count = int(progress_message.split(":")[1].strip())
+                        
+                        # This tells us how many scenarios were executed in the current iteration
+                        if search_method != "random":
+                            progress["scenarios_this_iteration"] = scenarios_count
+                        
+                        logger.info(f"Scenarios executed in current iteration for {experiment_id}: {scenarios_count}")
+                        updated = True
+                        
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse scenario executed from: {progress_message} - {e}")
+                
+                # Pattern 7: "End iteration X"
+                elif message_lower.startswith("end iteration"):
+                    try:
+                        iteration_num = int(progress_message.split()[-1])
+                        
+                        # For PSO/GA, when an iteration ends, reset the scenarios count for next iteration
+                        if search_method != "random":
+                            progress["scenarios_this_iteration"] = 0
+                        
+                        logger.info(f"Ended iteration {iteration_num} for {experiment_id}")
+                        updated = True
+                        
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse end iteration from: {progress_message} - {e}")
+                
+                # Pattern 8: "Scenario execution time: Xs" or "Iteration execution time: Xs"
+                elif "execution time:" in message_lower and "s" in progress_message:
+                    try:
+                        import re
+                        # Extract time value
+                        match = re.search(r'(\d+(?:\.\d+)?)s', progress_message)
+                        if match:
+                            execution_time = float(match.group(1))
+                            
+                            # For now, we'll use this as the elapsed time
+                            # In the future, we could distinguish between scenario and iteration times
+                            progress["elapsed_time"] = execution_time
+                            logger.debug(f"Updated execution time for {experiment_id}: {execution_time}s")
+                            updated = True
+                            
+                    except (ValueError, AttributeError) as e:
+                        logger.warning(f"Failed to parse execution time from: {progress_message} - {e}")
+                
+                # Pattern 9: "Total running time: Xs"
+                elif message_lower.startswith("total running time:"):
+                    try:
+                        import re
+                        match = re.search(r'(\d+(?:\.\d+)?)s', progress_message)
+                        if match:
+                            total_time = float(match.group(1))
+                            progress["elapsed_time"] = total_time
+                            logger.info(f"Final execution time for {experiment_id}: {total_time}s")
+                            updated = True
+                            
+                    except (ValueError, AttributeError) as e:
+                        logger.warning(f"Failed to parse total running time from: {progress_message} - {e}")
+                
+                # Update database if we have meaningful changes
+                if updated:
+                    try:
+                        update_experiment_status(
+                            experiment_id, 
+                            self.experiment_status[experiment_id]["status"],
+                            best_reward=progress.get("best_reward"),
+                            collision_found=progress.get("collision_found", False),
+                            current_iteration=progress.get("current_iteration", 0),
+                            scenarios_executed=progress.get("scenarios_executed", 0),
+                            scenarios_this_iteration=progress.get("scenarios_this_iteration", 0)
+                        )
+                        
+                        logger.info(f"Progress updated for {experiment_id}: "
+                                   f"iteration {progress['current_iteration']}/{progress['total_iterations']}, "
+                                   f"scenarios {progress['scenarios_executed']}/{progress['total_scenarios']}, "
+                                   f"best_reward {progress.get('best_reward')}")
+                    except Exception as e:
+                        logger.warning(f"Failed to update database for progress: {e}")
+                    
+        except Exception as e:
+            logger.debug(f"Could not parse progress from line: {line_str} - {e}")
+            
+    async def _parse_legacy_patterns(self, experiment_id: str, line_str: str):
+        """Parse legacy patterns for backward compatibility (collision detection, etc.)."""
+        try:
             line_lower = line_str.lower()
             
-            # Pattern: "Best reward: X.XXX"
-            if "best reward:" in line_lower:
-                try:
-                    reward_part = line_str.split(":")[-1].strip()
-                    best_reward = float(reward_part.split()[0])
-                except (ValueError, IndexError):
-                    pass
+            # Legacy collision detection patterns
+            collision_patterns = [
+                "collision found", "collision detected", "crash detected", 
+                "collision occurred: true", "🎯 collision found"
+            ]
             
-            # Pattern: "Iteration X/Y" or "Iteration: X/Y" 
-            elif "iteration" in line_lower and "/" in line_str:
-                try:
-                    # Find the iteration pattern
-                    import re
-                    match = re.search(r'iteration\s*:?\s*(\d+)\s*/\s*(\d+)', line_lower)
-                    if match:
-                        current_iteration = int(match.group(1))
-                except (ValueError, AttributeError):
-                    pass
+            if any(pattern in line_lower for pattern in collision_patterns):
+                if experiment_id in self.experiment_status:
+                    async with self._status_locks.get(experiment_id, asyncio.Lock()):
+                        if "progress" in self.experiment_status[experiment_id]:
+                            self.experiment_status[experiment_id]["progress"]["collision_found"] = True
+                            logger.info(f"Legacy collision detected in experiment {experiment_id}: {line_str}")
             
-            # Pattern: "Step X of Y" (alternative iteration format)
-            elif "step" in line_lower and "of" in line_lower:
-                try:
-                    import re
-                    match = re.search(r'step\s+(\d+)\s+of\s+(\d+)', line_lower)
-                    if match:
-                        current_iteration = int(match.group(1))
-                except (ValueError, AttributeError):
-                    pass
-            
-            # Pattern: collision detection
-            elif any(keyword in line_lower for keyword in ["collision found", "collision detected", "crash detected"]):
-                collision_found = True
-                logger.info(f"Collision detected in experiment {experiment_id}: {line_str}")
-            
-            # Pattern: "Reward: X.XXX" (alternative reward format)
-            elif line_lower.startswith("reward:") or "current reward:" in line_lower:
-                try:
-                    reward_part = line_str.split(":")[-1].strip()
-                    best_reward = float(reward_part.split()[0])
-                except (ValueError, IndexError):
-                    pass
-            
-            # Pattern: completion messages
-            elif any(keyword in line_lower for keyword in ["completed", "finished", "done"]):
-                logger.info(f"Completion indicator in experiment {experiment_id}: {line_str}")
-            
-            # Pattern: "Results saved to: /path/to/directory"
+            # Legacy "Results saved to:" pattern for output directory detection
             elif "results saved to:" in line_lower:
                 try:
                     actual_path = line_str.split(":")[-1].strip()
@@ -873,40 +1332,9 @@ class ExperimentService:
                     logger.info(f"Captured actual output directory for {experiment_id}: {actual_path}")
                 except Exception:
                     pass
-            
-            # Update progress in status if we have new information
-            if experiment_id in self.experiment_status and self.experiment_status[experiment_id] is not None:
-                # Use async lock to prevent concurrent modification
-                if experiment_id not in self._status_locks:
-                    self._status_locks[experiment_id] = asyncio.Lock()
-                
-                async with self._status_locks[experiment_id]:
-                    if ("progress" not in self.experiment_status[experiment_id] or 
-                        self.experiment_status[experiment_id]["progress"] is None):
-                        self.experiment_status[experiment_id]["progress"] = {
-                            "current_iteration": 0,
-                            "total_iterations": self.experiment_status[experiment_id]["config"].get("num_iterations", 10),
-                            "best_reward": None,
-                            "collision_found": False,
-                            "elapsed_time": None,
-                            "estimated_remaining": None,
-                            "recent_rewards": []
-                        }
-                    
-                    progress = self.experiment_status[experiment_id]["progress"]
-                    
-                    if best_reward is not None:
-                        progress["best_reward"] = best_reward
-                        logger.debug(f"Updated best reward for {experiment_id}: {best_reward}")
-                    if collision_found:
-                        progress["collision_found"] = True
-                        logger.info(f"Updated collision status for {experiment_id}: True")
-                    if current_iteration > 0:
-                        progress["current_iteration"] = current_iteration
-                        logger.debug(f"Updated iteration for {experiment_id}: {current_iteration}")
                     
         except Exception as e:
-            logger.debug(f"Could not parse progress from line: {line_str} - {e}")
+            logger.debug(f"Could not parse legacy patterns from line: {line_str} - {e}")
     
     async def _update_experiment_status(
         self, 
@@ -943,7 +1371,9 @@ class ExperimentService:
             db_kwargs = {}
             for key, value in kwargs.items():
                 if key == "final_reward":
-                    db_kwargs["best_reward"] = value
+                    sanitized_reward = sanitize_float_value(value)
+                    if sanitized_reward is not None:
+                        db_kwargs["best_reward"] = sanitized_reward
                 else:
                     db_kwargs[key] = value
             
@@ -954,7 +1384,9 @@ class ExperimentService:
                 elif key == "final_reward":
                     if "progress" not in status_dict:
                         status_dict["progress"] = {}
-                    status_dict["progress"]["best_reward"] = value
+                    sanitized_reward = sanitize_float_value(value)
+                    if sanitized_reward is not None:
+                        status_dict["progress"]["best_reward"] = sanitized_reward
                 elif key == "collision_found":
                     if "progress" not in status_dict:
                         status_dict["progress"] = {}

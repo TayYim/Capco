@@ -269,6 +269,10 @@ class LogStreamer:
         Returns:
             Detected log level
         """
+        # Check for [Progress] logs first - these get special treatment
+        if log_line.strip().startswith('[Progress]'):
+            return 'PROGRESS'
+        
         # Check for explicit log level patterns
         for level, pattern in self.log_level_patterns.items():
             if pattern.search(log_line):

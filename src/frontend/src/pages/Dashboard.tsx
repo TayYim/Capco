@@ -223,10 +223,10 @@ export function Dashboard() {
                         to={`/experiment/${experiment.id}`}
                         className="text-sm font-medium text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 truncate block"
                       >
-                        {experiment.route_id}
+                        {experiment.name}
                       </Link>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {experiment.search_method} • {experiment.status}
+                        Route {experiment.route_id} • {experiment.search_method} • {experiment.status}
                       </div>
                     </div>
                     

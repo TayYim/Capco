@@ -40,6 +40,7 @@ class RewardFunctionEnum(str, Enum):
 class ExperimentConfig(BaseModel):
     """Configuration for creating a new experiment."""
     
+    name: str = Field(..., min_length=2, max_length=100, description="Human-readable experiment name")
     route_id: str = Field(..., description="ID of the route to test")
     route_file: str = Field(default="routes_carlo", description="Route file name")
     search_method: SearchMethodEnum = Field(default=SearchMethodEnum.RANDOM, description="Search algorithm")
@@ -54,12 +55,12 @@ class ExperimentConfig(BaseModel):
     )
     
     # Search method specific parameters
-    pso_pop_size: Optional[int] = Field(default=20, ge=5, le=100, description="PSO population size")
+    pso_pop_size: Optional[int] = Field(default=20, ge=1, le=500, description="PSO population size")
     pso_w: Optional[float] = Field(default=0.8, ge=0.1, le=2.0, description="PSO inertia weight")
     pso_c1: Optional[float] = Field(default=0.5, ge=0.1, le=2.0, description="PSO cognitive parameter")
     pso_c2: Optional[float] = Field(default=0.5, ge=0.1, le=2.0, description="PSO social parameter")
     
-    ga_pop_size: Optional[int] = Field(default=50, ge=10, le=200, description="GA population size")
+    ga_pop_size: Optional[int] = Field(default=50, ge=1, le=500, description="GA population size")
     ga_prob_mut: Optional[float] = Field(default=0.1, ge=0.01, le=0.5, description="GA mutation probability")
     
     @validator('parameter_overrides')
@@ -75,19 +76,47 @@ class ExperimentConfig(BaseModel):
 class ProgressInfo(BaseModel):
     """Progress information for running experiments."""
     
-    current_iteration: int = Field(description="Current iteration number")
-    total_iterations: int = Field(description="Total planned iterations")
-    best_reward: Optional[float] = Field(description="Best reward found so far")
+    # Optimization-level tracking (PSO/GA iterations)
+    current_iteration: int = Field(description="Current optimization iteration number")
+    total_iterations: int = Field(description="Total planned optimization iterations")
+    
+    # Scenario-level tracking (actual CARLA simulations)
+    scenarios_executed: int = Field(default=0, description="Total scenarios executed so far")
+    total_scenarios: int = Field(description="Total scenarios to execute")
+    scenarios_this_iteration: int = Field(default=0, description="Scenarios executed in current iteration")
+    
+    # Results tracking
+    best_reward: Optional[float] = Field(default=None, description="Best reward found so far")
     collision_found: bool = Field(default=False, description="Whether collision was found")
-    elapsed_time: Optional[float] = Field(description="Elapsed time in seconds")
-    estimated_remaining: Optional[float] = Field(description="Estimated remaining time in seconds")
+    elapsed_time: Optional[float] = Field(default=None, description="Elapsed time in seconds")
+    estimated_remaining: Optional[float] = Field(default=None, description="Estimated remaining time in seconds")
     recent_rewards: List[float] = Field(default=[], description="Recent reward values")
+    
+    # Method-specific information
+    search_method: str = Field(description="Search method being used")
+    population_size: Optional[int] = Field(default=None, description="Population size for PSO/GA methods")
+    
+    # Computed progress percentages
+    @property
+    def iteration_progress_percentage(self) -> float:
+        """Calculate iteration progress percentage."""
+        if self.total_iterations == 0:
+            return 0.0
+        return (self.current_iteration / self.total_iterations) * 100
+    
+    @property
+    def scenario_progress_percentage(self) -> float:
+        """Calculate scenario progress percentage."""
+        if self.total_scenarios == 0:
+            return 0.0
+        return (self.scenarios_executed / self.total_scenarios) * 100
 
 
 class ExperimentStatus(BaseModel):
     """Current status of an experiment."""
     
     id: str = Field(description="Experiment ID")
+    name: str = Field(description="Human-readable experiment name")
     status: ExperimentStatusEnum = Field(description="Current status")
     config: ExperimentConfig = Field(description="Experiment configuration")
     progress: Optional[ProgressInfo] = Field(description="Progress information")
@@ -141,6 +170,7 @@ class ExperimentListItem(BaseModel):
     """Summary information for experiment list views."""
     
     id: str = Field(description="Experiment ID")
+    name: str = Field(description="Human-readable experiment name")
     route_id: str = Field(description="Route ID")
     route_file: str = Field(description="Route file")
     search_method: str = Field(description="Search method used")

@@ -20,10 +20,13 @@ import toast from 'react-hot-toast'
 import { apiClient } from '../services/api'
 import type { ExperimentConfig, ExperimentData } from '../types'
 import { LogViewer } from '../components/common/LogViewer'
+import { generateExperimentName } from '../utils/nameGenerator'
+import { getPrimaryProgress, getSecondaryProgress, formatProgressPercentage, getPollingInterval } from '../utils/progressUtils'
 import clsx from 'clsx'
 
 // Form validation schema
 const experimentSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters').max(100, 'Name must be less than 100 characters'),
   route_id: z.string().min(1, 'Route ID is required'),
   route_file: z.string().min(1, 'Route file is required'),
   search_method: z.enum(['random', 'pso', 'ga']),
@@ -33,12 +36,12 @@ const experimentSchema = z.object({
   random_seed: z.number().min(0),
   reward_function: z.enum(['collision', 'distance', 'safety_margin', 'ttc', 'ttc_div_dist', 'weighted_multi']),
   // PSO parameters
-  pso_pop_size: z.number().min(10).max(1000).optional(),
+  pso_pop_size: z.number().min(1).max(1000).optional(),
   pso_w: z.number().min(0).max(2).optional(),
   pso_c1: z.number().min(0).max(4).optional(),
   pso_c2: z.number().min(0).max(4).optional(),
   // GA parameters  
-  ga_pop_size: z.number().min(10).max(1000).optional(),
+  ga_pop_size: z.number().min(1).max(1000).optional(),
   ga_prob_mut: z.number().min(0).max(1).optional(),
 })
 
@@ -64,11 +67,11 @@ export function ExperimentPage() {
     queryFn: () => apiClient.getExperiment(id!),
     enabled: isEditing,
     refetchInterval: (query) => {
-      // Poll every 2 seconds if experiment is running, every 10 seconds otherwise
-      if (query.state.data?.status === 'running') {
-        return 2000 // 2 seconds for running experiments
+      // Use utility function to determine polling interval
+      if (query.state.data) {
+        return getPollingInterval(query.state.data)
       }
-      return 10000 // 10 seconds for other statuses
+      return 10000 // Default fallback
     },
   })
 
@@ -95,6 +98,7 @@ export function ExperimentPage() {
   } = useForm<ExperimentFormData>({
     resolver: zodResolver(experimentSchema),
     defaultValues: {
+      name: generateExperimentName('mixed'),
       search_method: 'random',
       num_iterations: 100,
       timeout_seconds: 300,
@@ -124,6 +128,7 @@ export function ExperimentPage() {
   useEffect(() => {
     if (experiment) {
       const config = experiment.config
+      setValue('name', config.name)
       setValue('route_id', config.route_id)
       setValue('route_file', config.route_file)
       setValue('search_method', config.search_method)
@@ -210,6 +215,7 @@ export function ExperimentPage() {
 
   const onSubmit = (data: ExperimentFormData) => {
     const config: ExperimentConfig = {
+      name: data.name,
       route_id: data.route_id,
       route_file: data.route_file,
       search_method: data.search_method,
@@ -260,7 +266,7 @@ export function ExperimentPage() {
 
   const handleDeleteExperiment = () => {
     if (id && experiment) {
-      if (window.confirm(`Are you sure you want to delete experiment ${experiment.config.route_id}? This action cannot be undone.`)) {
+      if (window.confirm(`Are you sure you want to delete experiment "${experiment.name}"? This action cannot be undone.`)) {
         deleteMutation.mutate(id)
       }
     }
@@ -284,7 +290,12 @@ export function ExperimentPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            {isCreating ? 'New Experiment' : isEditMode ? 'Edit Experiment' : 'Experiment Details'}
+            {isCreating 
+              ? 'New Experiment' 
+              : isEditMode 
+                ? `Edit: ${experiment?.name || 'Experiment'}` 
+                : experiment?.name || 'Experiment Details'
+            }
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {isCreating 
@@ -363,6 +374,35 @@ export function ExperimentPage() {
           </h3>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            {/* Experiment Name */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Experiment Name
+              </label>
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  {...register('name')}
+                  disabled={!isEditingConfig}
+                  placeholder="Enter a descriptive name for your experiment"
+                  className="mt-1 flex-1 border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
+                />
+                {isEditingConfig && (
+                  <button
+                    type="button"
+                    onClick={() => setValue('name', generateExperimentName('mixed'))}
+                    className="mt-1 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 dark:bg-gray-600 dark:hover:bg-gray-500 border border-gray-300 dark:border-gray-600 rounded-md text-gray-700 dark:text-gray-300"
+                    title="Generate random name"
+                  >
+                    🎲
+                  </button>
+                )}
+              </div>
+              {errors.name && (
+                <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
+              )}
+            </div>
+
             {/* Route Selection */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -640,6 +680,81 @@ function GAParameters({ register, errors, disabled }: any) {
   )
 }
 
+// Component for enhanced progress display
+function EnhancedProgressDisplay({ experiment }: { experiment: ExperimentData }) {
+  const primaryProgress = getPrimaryProgress(experiment)
+  const secondaryProgress = getSecondaryProgress(experiment)
+  
+  return (
+    <div className="mt-4 space-y-4">
+      {/* Primary Progress Bar */}
+      <div>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500 dark:text-gray-400">{primaryProgress.label}</span>
+          <span className="text-gray-900 dark:text-white">
+            {primaryProgress.current} / {primaryProgress.total}
+          </span>
+        </div>
+        <div className="mt-1 w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+          <div 
+            className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+            style={{ width: `${primaryProgress.percentage}%` }}
+          />
+        </div>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{primaryProgress.subtitle}</p>
+      </div>
+
+      {/* Method-specific details for PSO/GA */}
+      {secondaryProgress && (
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <div className="text-gray-500 dark:text-gray-400">Optimization Progress</div>
+            <div className="font-medium text-gray-900 dark:text-white">
+              {secondaryProgress.optimization_progress}
+            </div>
+          </div>
+          <div>
+            <div className="text-gray-500 dark:text-gray-400">Current Iteration</div>
+            <div className="font-medium text-gray-900 dark:text-white">
+              {secondaryProgress.current_iteration_progress}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Results Information */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        {experiment.progress?.best_reward !== null && experiment.progress?.best_reward !== undefined && (
+          <div>
+            <div className="text-gray-500 dark:text-gray-400">Best Reward</div>
+            <div className="font-medium text-gray-900 dark:text-white">
+              {experiment.progress.best_reward.toFixed(3)}
+            </div>
+          </div>
+        )}
+        
+        {experiment.progress?.collision_found && (
+          <div>
+            <div className="text-gray-500 dark:text-gray-400">Collision Status</div>
+            <div className="font-medium text-red-600 dark:text-red-400">
+              🎯 Collision Found!
+            </div>
+          </div>
+        )}
+        
+        {experiment.progress?.elapsed_time !== null && experiment.progress?.elapsed_time !== undefined && (
+          <div>
+            <div className="text-gray-500 dark:text-gray-400">Elapsed Time</div>
+            <div className="font-medium text-gray-900 dark:text-white">
+              {Math.round(experiment.progress.elapsed_time)}s
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Component for experiment status
 function ExperimentStatus({ experiment }: { experiment: ExperimentData }) {
   const getStatusColor = (status: string) => {
@@ -655,9 +770,14 @@ function ExperimentStatus({ experiment }: { experiment: ExperimentData }) {
   return (
     <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-          Experiment Status
-        </h3>
+        <div>
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+            {experiment.name}
+          </h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Route: {experiment.config.route_id} • File: {experiment.config.route_file}
+          </p>
+        </div>
         <span className={clsx(
           'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
           getStatusColor(experiment.status)
@@ -703,22 +823,7 @@ function ExperimentStatus({ experiment }: { experiment: ExperimentData }) {
       </div>
 
       {experiment.progress && (
-        <div className="mt-4">
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-500 dark:text-gray-400">Progress</span>
-            <span className="text-gray-900 dark:text-white">
-              {Math.round((experiment.progress.current_iteration / experiment.progress.total_iterations) * 100)}%
-            </span>
-          </div>
-          <div className="mt-1 w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
-            <div
-              className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
-              style={{
-                width: `${(experiment.progress.current_iteration / experiment.progress.total_iterations) * 100}%`
-              }}
-            />
-          </div>
-        </div>
+        <EnhancedProgressDisplay experiment={experiment} />
       )}
 
       {experiment.error_message && (

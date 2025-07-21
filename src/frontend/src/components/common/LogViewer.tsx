@@ -8,7 +8,8 @@ import {
   ExclamationTriangleIcon,
   CheckCircleIcon,
   InformationCircleIcon,
-  XCircleIcon
+  XCircleIcon,
+  ChartBarIcon
 } from '@heroicons/react/24/outline'
 
 interface LogEntry {
@@ -143,6 +144,8 @@ export function LogViewer({ experimentId, isRunning, experimentStatus }: LogView
         return <ExclamationTriangleIcon className="h-4 w-4 text-yellow-500" />
       case 'SUCCESS':
         return <CheckCircleIcon className="h-4 w-4 text-green-500" />
+      case 'PROGRESS':
+        return <ChartBarIcon className="h-4 w-4 text-purple-500" />
       case 'INFO':
         return <InformationCircleIcon className="h-4 w-4 text-blue-500" />
       default:
@@ -158,10 +161,27 @@ export function LogViewer({ experimentId, isRunning, experimentStatus }: LogView
         return 'text-yellow-600 dark:text-yellow-400'
       case 'SUCCESS':
         return 'text-green-600 dark:text-green-400'
+      case 'PROGRESS':
+        return 'text-purple-600 dark:text-purple-400'
       case 'INFO':
         return 'text-blue-600 dark:text-blue-400'
       default:
         return 'text-gray-600 dark:text-gray-400'
+    }
+  }
+
+  const getLogRowStyling = (level: string) => {
+    switch (level.toUpperCase()) {
+      case 'PROGRESS':
+        return 'bg-purple-50 dark:bg-purple-900/20 border-l-2 border-purple-500'
+      case 'ERROR':
+        return 'bg-red-50 dark:bg-red-900/20'
+      case 'WARNING':
+        return 'bg-yellow-50 dark:bg-yellow-900/20'
+      case 'SUCCESS':
+        return 'bg-green-50 dark:bg-green-900/20'
+      default:
+        return ''
     }
   }
 
@@ -254,7 +274,10 @@ export function LogViewer({ experimentId, isRunning, experimentStatus }: LogView
                 {logs.map((log, index) => (
                   <div
                     key={index}
-                    className="flex items-start space-x-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2"
+                    className={clsx(
+                      "flex items-start space-x-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2",
+                      getLogRowStyling(log.level)
+                    )}
                   >
                     <div className="flex-shrink-0 mt-0.5">
                       {getLogLevelIcon(log.level)}

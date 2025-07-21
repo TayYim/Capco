@@ -67,8 +67,10 @@ export function HistoryPage() {
 
   const filteredExperiments = experiments?.filter(experiment => {
     if (!searchQuery) return true
-    return experiment.route_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           experiment.route_file.toLowerCase().includes(searchQuery.toLowerCase())
+    const query = searchQuery.toLowerCase()
+    return experiment.name.toLowerCase().includes(query) ||
+           experiment.route_id.toLowerCase().includes(query) ||
+           experiment.route_file.toLowerCase().includes(query)
   })
 
   const getStatusIcon = (status: string) => {
@@ -159,7 +161,7 @@ export function HistoryPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="block w-full pl-10 border-gray-300 dark:border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
-                placeholder="Search by route ID or file..."
+                placeholder="Search by name, route ID, or file..."
               />
             </div>
           </div>
@@ -417,11 +419,11 @@ function ExperimentRow({
                 to={`/experiment/${experiment.id}`}
                 className="hover:text-indigo-600 dark:hover:text-indigo-400"
               >
-                {experiment.route_id}
+                {experiment.name}
               </Link>
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              {experiment.route_file}
+              Route {experiment.route_id} • {experiment.route_file}
             </div>
           </div>
         </div>
@@ -516,7 +518,7 @@ function ExperimentRow({
           
           <button
             onClick={() => {
-              if (window.confirm(`Are you sure you want to delete experiment ${experiment.route_id}? This action cannot be undone.`)) {
+              if (window.confirm(`Are you sure you want to delete experiment "${experiment.name}"? This action cannot be undone.`)) {
                 onDelete(experiment.id)
               }
             }}
