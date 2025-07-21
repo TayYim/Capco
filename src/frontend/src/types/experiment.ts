@@ -7,6 +7,13 @@ export type SearchMethod = 'random' | 'pso' | 'ga'
 
 export type RewardFunction = 'collision' | 'distance' | 'safety_margin' | 'ttc' | 'ttc_div_dist' | 'weighted_multi'
 
+export interface RewardDataPoint {
+  scenario_number: number
+  reward: number
+  iteration: number
+  timestamp?: string
+}
+
 export interface ExperimentConfig {
   name: string
   route_id: string
@@ -44,6 +51,9 @@ export interface ProgressInfo {
   elapsed_time?: number
   estimated_remaining?: number
   recent_rewards: number[]
+  
+  // Real-time charting data
+  reward_history: RewardDataPoint[]
   
   // Method-specific information
   search_method: string

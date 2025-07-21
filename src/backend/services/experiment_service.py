@@ -199,6 +199,7 @@ class ExperimentService:
             "elapsed_time": None,  # Runtime-only data
             "estimated_remaining": None,  # Runtime-only data
             "recent_rewards": [],  # Runtime-only data
+            "reward_history": [],  # Runtime-only data for charting
             "search_method": search_method,
             "population_size": population_size if search_method != 'random' else None
         }
@@ -352,6 +353,7 @@ class ExperimentService:
             elapsed_time=None,
             estimated_remaining=None,
             recent_rewards=[],
+            reward_history=[],
             search_method=config.search_method.value,
             population_size=population_size if config.search_method.value != 'random' else None
         )
@@ -1118,6 +1120,7 @@ class ExperimentService:
                         "elapsed_time": None,
                         "estimated_remaining": None,
                         "recent_rewards": [],
+                        "reward_history": [],
                         "search_method": search_method,
                         "population_size": population_size if search_method != 'random' else None
                     }
@@ -1218,6 +1221,29 @@ class ExperimentService:
                             recent_rewards = progress.get("recent_rewards", [])
                             recent_rewards.append(sanitized_reward)
                             progress["recent_rewards"] = recent_rewards[-10:]  # Keep last 10
+                            
+                            # Add to reward history for charting
+                            if "reward_history" not in progress:
+                                progress["reward_history"] = []
+                            
+                            # Create reward data point
+                            scenario_number = progress.get("scenarios_executed", 0) + 1  # Next scenario number
+                            current_iteration = progress.get("current_iteration", 1)
+                            
+                            reward_data_point = {
+                                "scenario_number": scenario_number,
+                                "reward": sanitized_reward,
+                                "iteration": current_iteration,
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            
+                            progress["reward_history"].append(reward_data_point)
+                            
+                            # Keep reward history reasonable (last 1000 points for performance)
+                            if len(progress["reward_history"]) > 1000:
+                                progress["reward_history"] = progress["reward_history"][-1000:]
+                            
+                            logger.info(f"Added reward data point for {experiment_id}: scenario {scenario_number}, reward {sanitized_reward}")
                             
                             # Check for collision (reward of 0.0 typically indicates collision)
                             if sanitized_reward == 0.0:

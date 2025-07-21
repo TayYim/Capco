@@ -37,6 +37,15 @@ class RewardFunctionEnum(str, Enum):
     WEIGHTED_MULTI = "weighted_multi"
 
 
+class RewardDataPoint(BaseModel):
+    """Individual reward data point for charting."""
+    
+    scenario_number: int = Field(description="Sequential scenario number (1, 2, 3, ...)")
+    reward: float = Field(description="Reward value for this scenario")
+    iteration: int = Field(description="Optimization iteration this scenario belongs to")
+    timestamp: Optional[datetime] = Field(default=None, description="When this scenario was executed")
+
+
 class ExperimentConfig(BaseModel):
     """Configuration for creating a new experiment."""
     
@@ -91,6 +100,9 @@ class ProgressInfo(BaseModel):
     elapsed_time: Optional[float] = Field(default=None, description="Elapsed time in seconds")
     estimated_remaining: Optional[float] = Field(default=None, description="Estimated remaining time in seconds")
     recent_rewards: List[float] = Field(default=[], description="Recent reward values")
+    
+    # Real-time charting data
+    reward_history: List[RewardDataPoint] = Field(default=[], description="Complete reward history for charting")
     
     # Method-specific information
     search_method: str = Field(description="Search method being used")

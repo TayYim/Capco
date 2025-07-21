@@ -20,6 +20,7 @@ import toast from 'react-hot-toast'
 import { apiClient } from '../services/api'
 import type { ExperimentConfig, ExperimentData } from '../types'
 import { LogViewer } from '../components/common/LogViewer'
+import { RewardChart } from '../components/common/RewardChart'
 import { generateExperimentName } from '../utils/nameGenerator'
 import { getPrimaryProgress, getSecondaryProgress, formatProgressPercentage, getPollingInterval } from '../utils/progressUtils'
 import clsx from 'clsx'
@@ -399,6 +400,17 @@ export function ExperimentPage() {
       {/* Status Card (for existing experiments) */}
       {isEditing && experiment && (
         <ExperimentStatus experiment={experiment} />
+      )}
+
+      {/* Real-time Reward Chart (for experiments with data) */}
+      {isEditing && experiment && experiment.progress?.reward_history && experiment.progress.reward_history.length > 0 && (
+        <RewardChart 
+          rewardHistory={experiment.progress.reward_history}
+          title="Real-time Reward Progress"
+          isRunning={experiment.status === 'running'}
+          height={400}
+          className="mb-6"
+        />
       )}
 
       {/* Real-time Logs (for existing experiments) */}
