@@ -916,6 +916,14 @@ class ExperimentService:
                 # Update the experiment status with the correct output directory
                 async with self._status_locks.get(experiment_id, asyncio.Lock()):
                     status_dict["output_directory"] = str(actual_output_dir)
+                
+                # Also update the database with the actual output directory
+                try:
+                    from core.database import update_experiment_status
+                    update_experiment_status(experiment_id, status_dict["status"], output_directory=str(actual_output_dir))
+                    logger.info(f"Updated database with actual output directory: {actual_output_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to update database with actual output directory: {e}")
             
             # Check for results in both expected and actual directories
             dirs_to_check = [output_dir]

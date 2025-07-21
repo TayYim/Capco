@@ -213,6 +213,33 @@ export function ExperimentPage() {
     }
   })
 
+  // Download experiment archive mutation
+  const downloadMutation = useMutation({
+    mutationFn: (experimentId: string) => apiClient.downloadExperimentArchive(experimentId, 'zip'),
+    onSuccess: (blob, experimentId) => {
+      // Create a download link and trigger the download
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '_')
+      link.download = `experiment_${experimentId}_${timestamp}.zip`
+      
+      document.body.appendChild(link)
+      link.click()
+      
+      // Cleanup
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(link)
+      
+      toast.success('Download started!')
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to download experiment files')
+    }
+  })
+
   const onSubmit = (data: ExperimentFormData) => {
     const config: ExperimentConfig = {
       name: data.name,
@@ -272,6 +299,12 @@ export function ExperimentPage() {
     }
   }
 
+  const handleDownloadExperiment = () => {
+    if (id) {
+      downloadMutation.mutate(id)
+    }
+  }
+
   if (experimentLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -328,6 +361,17 @@ export function ExperimentPage() {
               >
                 <StopIcon className="h-4 w-4 mr-2" />
                 Stop
+              </button>
+            )}
+
+            {experiment.status === 'completed' && (
+              <button
+                onClick={handleDownloadExperiment}
+                disabled={downloadMutation.isPending}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+              >
+                <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
+                {downloadMutation.isPending ? 'Downloading...' : 'Download'}
               </button>
             )}
             

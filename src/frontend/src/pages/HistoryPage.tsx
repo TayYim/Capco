@@ -65,6 +65,33 @@ export function HistoryPage() {
     }
   })
 
+  // Download experiment archive mutation
+  const downloadMutation = useMutation({
+    mutationFn: (experimentId: string) => apiClient.downloadExperimentArchive(experimentId, 'zip'),
+    onSuccess: (blob, experimentId) => {
+      // Create a download link and trigger the download
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '_')
+      link.download = `experiment_${experimentId}_${timestamp}.zip`
+      
+      document.body.appendChild(link)
+      link.click()
+      
+      // Cleanup
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(link)
+      
+      toast.success('Download started!')
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to download experiment files')
+    }
+  })
+
   const filteredExperiments = experiments?.filter(experiment => {
     if (!searchQuery) return true
     const query = searchQuery.toLowerCase()
@@ -261,6 +288,8 @@ export function HistoryPage() {
                     duplicating={duplicateMutation.isPending}
                     onDelete={(id) => deleteMutation.mutate(id)}
                     deleting={deleteMutation.isPending}
+                    onDownload={(id) => downloadMutation.mutate(id)}
+                    downloading={downloadMutation.isPending}
                   />
                 ))}
               </tbody>
@@ -348,13 +377,17 @@ function ExperimentRow({
   onDuplicate,
   duplicating,
   onDelete, 
-  deleting 
+  deleting,
+  onDownload,
+  downloading
 }: { 
   experiment: ExperimentListItem
   onDuplicate: (id: string) => void
   duplicating: boolean
   onDelete: (id: string) => void
   deleting: boolean
+  onDownload: (id: string) => void
+  downloading: boolean
 }) {
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -496,11 +529,9 @@ function ExperimentRow({
           
           {experiment.status === 'completed' && (
             <button
-              onClick={() => {
-                // TODO: Implement download
-                console.log('Download experiment:', experiment.id)
-              }}
-              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-300"
+              onClick={() => onDownload(experiment.id)}
+              disabled={downloading}
+              className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 disabled:opacity-50"
               title="Download results"
             >
               <ArrowDownTrayIcon className="h-4 w-4" />

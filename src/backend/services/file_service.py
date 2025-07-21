@@ -30,7 +30,14 @@ class FileService:
     """Service for managing experiment files and data analysis."""
     
     def __init__(self):
-        self.output_base_dir = Path(settings.output_dir)
+        # Ensure output_dir is relative to project root, not backend directory
+        if Path(settings.output_dir).is_absolute():
+            self.output_base_dir = Path(settings.output_dir)
+        else:
+            # If relative, assume it's relative to project root
+            # Go up from services -> backend -> src -> project root
+            project_root = Path(__file__).parent.parent.parent.parent  # services -> backend -> src -> Carlo
+            self.output_base_dir = project_root / settings.output_dir
         self.max_preview_lines = 1000
         self.max_file_size_for_preview = 10 * 1024 * 1024  # 10MB
     
@@ -422,7 +429,34 @@ class FileService:
     def _get_experiment_directory(self, experiment_id: str) -> Optional[Path]:
         """Get the directory path for an experiment."""
         try:
-            # Handle different possible naming patterns
+            # First try to get the actual output directory from ExperimentService
+            try:
+                from services.experiment_service import get_experiment_service
+                experiment_service = get_experiment_service()
+                
+                # Check if experiment exists and get its output directory
+                if experiment_id in experiment_service.experiment_status:
+                    output_dir = experiment_service.experiment_status[experiment_id].get("output_directory")
+                    if output_dir:
+                        dir_path = Path(output_dir)
+                        if dir_path.exists() and self._has_experiment_results(dir_path):
+                            logger.info(f"Found experiment directory from ExperimentService: {dir_path}")
+                            return dir_path
+            except Exception as e:
+                logger.debug(f"Could not get directory from ExperimentService: {e}")
+            
+            # Check if there are fuzzing_* directories (these are the real experiment results)
+            # Look for fuzzing_* directories first since they contain the actual results
+            fuzzing_dirs = list(self.output_base_dir.glob("fuzzing_*"))
+            if fuzzing_dirs:
+                # Sort by modification time and return the most recent one that has results
+                fuzzing_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                for fuzzing_dir in fuzzing_dirs:
+                    if self._has_experiment_results(fuzzing_dir):
+                        logger.info(f"Found experiment directory via fuzzing pattern: {fuzzing_dir}")
+                        return fuzzing_dir
+            
+            # Fallback: Handle different possible naming patterns (but verify they have results)
             possible_patterns = [
                 f"experiment_{experiment_id}",
                 f"fuzzing_*_{experiment_id}_*",
@@ -433,19 +467,52 @@ class FileService:
                 if "*" in pattern:
                     # Use glob for patterns with wildcards
                     matches = list(self.output_base_dir.glob(pattern))
-                    if matches:
-                        return matches[0]  # Return first match
+                    for match in matches:
+                        if self._has_experiment_results(match):
+                            logger.info(f"Found experiment directory via pattern matching: {match}")
+                            return match
                 else:
                     # Direct path check
                     dir_path = self.output_base_dir / pattern
-                    if dir_path.exists():
+                    if dir_path.exists() and self._has_experiment_results(dir_path):
+                        logger.info(f"Found experiment directory via direct path: {dir_path}")
                         return dir_path
             
+            logger.error(f"No valid experiment directory with results found for {experiment_id}")
             return None
             
         except Exception as e:
             logger.error(f"Error getting experiment directory for {experiment_id}: {e}")
             return None
+
+    def _has_experiment_results(self, directory: Path) -> bool:
+        """Check if a directory contains actual experiment results (not just config)."""
+        try:
+            if not directory.exists():
+                return False
+            
+            # Look for key result files that indicate this is a real experiment output
+            result_indicators = [
+                "best_solution.json",
+                "search_history.csv", 
+                "experiment_results.csv",
+                "fuzzing.log"
+            ]
+            
+            for indicator in result_indicators:
+                if (directory / indicator).exists():
+                    return True
+            
+            # If we only find experiment_config.json and nothing else, it's not a real result directory
+            files = list(directory.iterdir())
+            if len(files) == 1 and files[0].name == "experiment_config.json":
+                return False
+                
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Error checking if {directory} has experiment results: {e}")
+            return False
     
     def _is_text_file(self, file_path: Path) -> bool:
         """Check if a file is a text file."""
