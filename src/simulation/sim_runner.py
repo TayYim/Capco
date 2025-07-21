@@ -52,6 +52,67 @@ from utils.parameter_range_manager import ParameterRangeManager
 from rewards import RewardRegistry
 
 
+class ProgressLogger:
+    """
+    Dedicated logger for progress tracking with [Progress] prefix.
+    
+    Handles timing and progress logging for experiments, iterations, and scenarios.
+    """
+    
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
+        self.experiment_start_time = None
+        self.current_iteration_start_time = None
+        self.current_scenario_start_time = None
+        
+        # Progress counters
+        self.total_scenarios_executed = 0
+        self.current_iteration_scenarios = 0
+        
+    def start_experiment(self, total_iterations: int):
+        """Start experiment timing and log summary."""
+        self.experiment_start_time = time.perf_counter()
+        self.logger.info(f"[Progress] Total iterations: {total_iterations}")
+        
+    def start_iteration(self, iteration_num: int):
+        """Start iteration timing and log."""
+        self.current_iteration_start_time = time.perf_counter()
+        self.current_iteration_scenarios = 0
+        self.logger.info(f"[Progress] Start iteration {iteration_num}")
+        
+    def end_iteration(self, iteration_num: int):
+        """End iteration timing and log."""
+        if self.current_iteration_start_time:
+            iteration_time = time.perf_counter() - self.current_iteration_start_time
+            self.logger.info(f"[Progress] Scenario executed: {self.current_iteration_scenarios}")
+            self.logger.info(f"[Progress] End iteration {iteration_num}")
+            self.logger.info(f"[Progress] Iteration execution time: {iteration_time:.0f}s")
+            
+    def start_scenario(self, scenario_num: int, iteration_num: int, total_iterations: int):
+        """Start scenario timing and log."""
+        self.current_scenario_start_time = time.perf_counter()
+        self.current_iteration_scenarios += 1
+        self.total_scenarios_executed += 1
+        self.logger.info(f"[Progress] Start scenario execution {scenario_num}, iteration {iteration_num}/{total_iterations}")
+        
+    def end_scenario(self, scenario_num: int, iteration_num: int, total_iterations: int):
+        """End scenario timing and log."""
+        if self.current_scenario_start_time:
+            scenario_time = time.perf_counter() - self.current_scenario_start_time
+            self.logger.info(f"[Progress] End scenario execution {scenario_num}, iteration {iteration_num}/{total_iterations}")
+            self.logger.info(f"[Progress] Scenario execution time: {scenario_time:.0f}s")
+            
+    def log_reward(self, reward: float):
+        """Log reward update."""
+        self.logger.info(f"[Progress] Reward: {reward:.6f}")
+        
+    def end_experiment(self):
+        """End experiment timing and log total time."""
+        if self.experiment_start_time:
+            total_time = time.perf_counter() - self.experiment_start_time
+            self.logger.info(f"[Progress] Total running time: {total_time:.0f}s")
+
+
 class SearchMethodRegistry:
     """Registry for managing different search methods."""
     
@@ -94,7 +155,6 @@ def search_method_decorator(method_name: str):
             # Setup
             self.current_search_method = method_name
             self._reset_search_state()
-            start_time = time.perf_counter()
             
             self.logger.info(f"Starting search with method: {method_name}")
             self.logger.info(f"Parameters: {dict(zip(func.__code__.co_varnames[1:], args))}")
@@ -102,20 +162,15 @@ def search_method_decorator(method_name: str):
             # Reset random seed for reproducibility
             self._set_random_seed(self.random_seed)
             
-            def terminate_search(start_time):
+            def terminate_search():
                 """Clean termination of search."""
-                end_time = time.perf_counter()
-                time_usage = end_time - start_time
-                
-                # Save timing information
-                if 'time' not in self.search_history_data:
-                    self.search_history_data['time'] = []
-                self.search_history_data['time'].append(time_usage)
+                # End experiment timing
+                self.progress_logger.end_experiment()
                 
                 # Save all results
                 self._save_search_results()
                 
-                self.logger.info(f"Search completed. Method: {method_name}, Time: {time_usage:.2f}s")
+                self.logger.info(f"Search completed. Method: {method_name}")
                 self.logger.info(f"Results saved to: {self.output_dir}")
                 
                 # Cleanup CARLA if needed
@@ -125,7 +180,7 @@ def search_method_decorator(method_name: str):
             def signal_handler(sig, frame):
                 """Handle user interruption gracefully."""
                 self.logger.info("Search interrupted by user")
-                terminate_search(start_time)
+                terminate_search()
                 sys.exit(0)
             
             # Set up signal handler
@@ -136,12 +191,12 @@ def search_method_decorator(method_name: str):
                 result = func(self, *args, **kwargs)
                 
                 # Normal termination
-                terminate_search(start_time)
+                terminate_search()
                 return result
                 
             except Exception as e:
                 self.logger.error(f"Error in search method {method_name}: {e}")
-                terminate_search(start_time)
+                terminate_search()
                 raise
         
         return wrapper
@@ -160,12 +215,14 @@ class ScenarioFuzzer:
     - Multiple search algorithms (Random, PSO, GA)
     - Modular architecture for easy extension
     - Comprehensive result tracking and analysis
+    - Enhanced progress logging with timing information
     - Robust error handling and cleanup
     - Easy-to-use interface for method selection
     """
     
     # Class-level configuration
     SUPPORTED_SEARCH_METHODS = ['random', 'pso', 'ga'] if SKO_AVAILABLE else ['random']
+    SUPPORTED_AGENTS = ['ba', 'apollo']
     
     def __init__(self, 
                  route_id: str,
@@ -177,7 +234,16 @@ class ScenarioFuzzer:
                  parameter_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
                  random_seed: int = 42,
                  restart_gap: int = 5,
-                 reward_function: str = "ttc"):
+                 reward_function: str = "ttc",
+                 agent: str = "ba",
+                 # PSO parameters
+                 pso_pop_size: int = 20,
+                 pso_w: float = 0.8,
+                 pso_c1: float = 0.5,
+                 pso_c2: float = 0.5,
+                 # GA parameters
+                 ga_pop_size: int = 50,
+                 ga_prob_mut: float = 0.1):
         """
         Initialize the scenario fuzzer.
         
@@ -192,6 +258,13 @@ class ScenarioFuzzer:
             random_seed: Random seed for reproducibility
             reward_function: Name of the reward function to use
             restart_gap: Number of runs before restarting CARLA
+            agent: Agent type to use ('ba' for Behavior Agent, 'apollo' for Apollo)
+            pso_pop_size: PSO population size
+            pso_w: PSO inertia weight
+            pso_c1: PSO cognitive parameter
+            pso_c2: PSO social parameter
+            ga_pop_size: GA population size
+            ga_prob_mut: GA mutation probability
         """
         # Validate search method
         if search_method not in self.SUPPORTED_SEARCH_METHODS:
@@ -202,12 +275,23 @@ class ScenarioFuzzer:
             raise ValueError(f"Unsupported search method: {search_method}. "
                            f"Available: {available_methods}")
         
+        # Validate agent
+        if agent not in self.SUPPORTED_AGENTS:
+            raise ValueError(f"Unsupported agent: {agent}. Available: {self.SUPPORTED_AGENTS}")
+        
         # Basic configuration
         self.route_id = route_id
         self.route_file = route_file
-        self.restart_gap = restart_gap
+        self.agent = agent
         self.timeout_seconds = timeout_seconds
         self.headless = headless
+        
+        # Agent-specific configuration
+        self.restart_gap = 1 if agent == "apollo" else restart_gap  # Apollo needs frequent restarts
+        
+        # Apollo configuration (loaded on-demand)
+        self._apollo_config_loader = None
+        self._apollo_config = None
         
         # Paths
         self.carla_path = Path("/home/tay/Applications/CARLA_LB")  # TODO: get it from config file
@@ -226,6 +310,16 @@ class ScenarioFuzzer:
         self.random_seed = random_seed
         self.parameter_ranges = parameter_ranges or {}
         
+        # PSO parameters
+        self.pso_pop_size = pso_pop_size
+        self.pso_w = pso_w
+        self.pso_c1 = pso_c1
+        self.pso_c2 = pso_c2
+        
+        # GA parameters
+        self.ga_pop_size = ga_pop_size
+        self.ga_prob_mut = ga_prob_mut
+        
         # Reward function configuration
         self.reward_function_name = reward_function
         try:
@@ -240,6 +334,11 @@ class ScenarioFuzzer:
         self.best_solution = None
         self.best_reward = float('inf')
         self.current_iteration = 0
+        
+        # Enhanced progress tracking for PSO/GA
+        self.current_optimization_iteration = 0  # Which PSO/GA iteration we're in
+        self.current_population_index = 0        # Which individual in the population
+        self.population_size = 1                 # Size of current population
         
         # Parameter management
         self._detected_parameters = {}
@@ -260,6 +359,9 @@ class ScenarioFuzzer:
         # Setup logging
         self.setup_logging()
         
+        # Initialize progress logger
+        self.progress_logger = ProgressLogger(self.logger)
+        
         # Log reward function after logger is set up
         self.logger.info(f"Using reward function: {reward_function}")
         
@@ -278,6 +380,37 @@ class ScenarioFuzzer:
         
         # Initialize search infrastructure
         self._initialize_search_infrastructure()
+
+    def _get_apollo_config(self):
+        """Get Apollo configuration, loading it on first access."""
+        if self.agent != "apollo":
+            return None
+            
+        if self._apollo_config is None:
+            try:
+                from utils.apollo_config_loader import get_apollo_config_loader
+                self._apollo_config_loader = get_apollo_config_loader()
+                self._apollo_config = self._apollo_config_loader.load_config()
+                container_name = self._apollo_config_loader.get_container_name()
+                user_name = self._apollo_config_loader.get_user_name()
+                self.logger.info(f"Apollo config loaded: container={container_name}, user={user_name}")
+            except Exception as e:
+                self.logger.error(f"Failed to load Apollo configuration: {e}")
+                self.logger.warning("Using default Apollo settings")
+                self._apollo_config = {
+                    'container_name': 'apollo_dev_tay',
+                    'user_name': 'tay'
+                }
+                
+        return self._apollo_config
+
+    def _get_apollo_container_name(self) -> str:
+        """Get Apollo container name from config."""
+        try:
+            from utils.apollo_config_loader import get_apollo_container_name
+            return get_apollo_container_name()
+        except Exception:
+            return "apollo_dev_tay"
 
     def setup_logging(self):
         """Setup comprehensive logging for the fuzzing framework."""
@@ -498,12 +631,52 @@ class ScenarioFuzzer:
         """
         self.current_iteration += 1
         
+        # Update population tracking for PSO/GA
+        if self.search_method in ['pso', 'ga']:
+            self.current_population_index += 1
+            if self.current_population_index > self.population_size:
+                # End previous iteration
+                self.progress_logger.end_iteration(self.current_optimization_iteration)
+                # Starting new optimization iteration
+                self.current_optimization_iteration += 1
+                self.current_population_index = 1
+                # Start new iteration
+                self.progress_logger.start_iteration(self.current_optimization_iteration)
+        else:
+            # For random search, optimization iteration equals scenario iteration
+            self.current_optimization_iteration = self.current_iteration
+            # Start iteration (for random search, each scenario is an iteration)
+            self.progress_logger.start_iteration(self.current_optimization_iteration)
+        
+        # Start scenario logging
+        self.progress_logger.start_scenario(
+            self.current_iteration, 
+            self.current_optimization_iteration, 
+            self.num_iterations
+        )
+        
         # Update XML with new parameters
         self._update_scenario_xml(parameters)
         
-        # Log current parameters
+        # Log current parameters with enhanced info for PSO/GA
         param_dict = dict(zip(self._param_names, parameters))
-        self.logger.info(f"Iteration {self.current_iteration}: Testing parameters {param_dict}")
+        if self.search_method in ['pso', 'ga']:
+            self.logger.info(f"Testing scenario {self.current_population_index}/{self.population_size} in iteration {self.current_optimization_iteration}: {param_dict}")
+        else:
+            self.logger.info(f"Iteration {self.current_iteration}: Testing parameters {param_dict}")
+        
+        # Check if CARLA needs restart based on restart gap
+        self.runs_since_restart += 1
+        if self.runs_since_restart >= self.restart_gap:
+            self.logger.info(f"Restarting CARLA after {self.runs_since_restart} runs (restart gap: {self.restart_gap})")
+            self.kill_carla_processes(force=True)
+            
+            # Apollo-specific container restart
+            if self.agent == "apollo":
+                self._restart_apollo_container()
+            
+            if not self.start_carla():
+                raise RuntimeError("Failed to restart CARLA")
         
         # Run simulation
         run_status = self.run_simulation_with_timeout(self.current_iteration)
@@ -514,6 +687,16 @@ class ScenarioFuzzer:
         
         # Calculate reward using selected reward function (lower is better)
         reward = self.reward_function(result)
+        
+        # Log progress reward
+        self.progress_logger.log_reward(reward)
+        
+        # End scenario logging
+        self.progress_logger.end_scenario(
+            self.current_iteration, 
+            self.current_optimization_iteration, 
+            self.num_iterations
+        )
         
         # Log reward information
         collision_flag = result.get('collision_flag', False)
@@ -540,6 +723,10 @@ class ScenarioFuzzer:
         self.search_history_data['distances'].append(result.get('distance', None))
         self.search_history_data['iterations'].append(self.current_iteration)
         self.search_history_data['methods'].append(self.current_search_method)
+        
+        # For random search, end iteration immediately
+        if self.search_method == 'random':
+            self.progress_logger.end_iteration(self.current_optimization_iteration)
         
         return reward
 
@@ -619,12 +806,18 @@ class ScenarioFuzzer:
             
             # Save best solution to JSON
             best_solution_file = self.output_dir / "best_solution.json"
+            
+            # Convert best_solution to list if it's a numpy array
+            best_solution_list = None
+            if self.best_solution is not None:
+                best_solution_list = self.best_solution.tolist() if hasattr(self.best_solution, 'tolist') else list(self.best_solution)
+            
             best_solution_data = {
-                'best_reward': self.best_reward,
-                'best_parameters': dict(zip(self._param_names, self.best_solution)) if self.best_solution else None,
+                'best_reward': float(self.best_reward) if not np.isnan(self.best_reward) else None,
+                'best_parameters': dict(zip(self._param_names, best_solution_list)) if best_solution_list is not None else None,
                 'search_method': self.current_search_method,
                 'total_iterations': self.current_iteration,
-                'collision_found': self.best_reward == 0.0,
+                'collision_found': float(self.best_reward) == 0.0 if not np.isnan(self.best_reward) else False,
                 'search_bounds': dict(zip(self._param_names, self._search_bounds)) if self._search_bounds else {},
                 'timestamp': datetime.now().isoformat()
             }
@@ -661,6 +854,9 @@ class ScenarioFuzzer:
             
         self.logger.info(f"Starting random search with {iterations} iterations")
         
+        # Start experiment progress logging
+        self.progress_logger.start_experiment(iterations)
+        
         for i in range(iterations):
             if self.should_exit:
                 self.logger.info("Random search terminated by user")
@@ -688,10 +884,10 @@ class ScenarioFuzzer:
     @search_method_decorator('pso')
     def search_pso(self, 
                    iterations: Optional[int] = None,
-                   pop_size: int = 20,
-                   w: float = 0.8,
-                   c1: float = 0.5,
-                   c2: float = 0.5) -> Tuple[List[float], float]:
+                   pop_size: Optional[int] = None,
+                   w: Optional[float] = None,
+                   c1: Optional[float] = None,
+                   c2: Optional[float] = None) -> Tuple[List[float], float]:
         """
         Particle Swarm Optimization search method.
         
@@ -710,31 +906,69 @@ class ScenarioFuzzer:
             
         if iterations is None:
             iterations = self.num_iterations
+        if pop_size is None:
+            pop_size = self.pso_pop_size
+        if w is None:
+            w = self.pso_w
+        if c1 is None:
+            c1 = self.pso_c1
+        if c2 is None:
+            c2 = self.pso_c2
             
         if not self._search_bounds:
             raise ValueError("No search bounds available for optimization")
+        
+        # Calculate PSO max_iter before logging
+        # PSO max_iter is inclusive, so subtract 1 to get the desired number of iterations
+        # Special case: if user wants 1 iteration, set max_iter to 0 (will run iteration 0 only)
+        pso_max_iter = max(0, iterations - 1)  # Allow 0 for single iteration case
             
         self.logger.info(f"Starting PSO search with {iterations} iterations, population size {pop_size}")
+        self.logger.info(f"PSO parameters: w={w}, c1={c1}, c2={c2}")
+        self.logger.info(f"PSO max_iter adjusted to {pso_max_iter} (user requested {iterations} iterations)")
+        
+        # Start experiment progress logging
+        self.progress_logger.start_experiment(iterations)
+        
+        # Set population size for progress tracking
+        self.population_size = pop_size
+        self.current_optimization_iteration = 1
+        self.current_population_index = 0
+        
+        # Start first iteration explicitly for PSO
+        self.progress_logger.start_iteration(1)
         
         # Setup PSO
         n_dim = len(self._search_bounds)
         lb = [bound[0] for bound in self._search_bounds]
         ub = [bound[1] for bound in self._search_bounds]
         
-        pso = PSO(func=self._evaluate_scenario, n_dim=n_dim, pop=pop_size, max_iter=iterations,
+        pso = PSO(func=self._evaluate_scenario, n_dim=n_dim, pop=pop_size, max_iter=pso_max_iter,
                   lb=lb, ub=ub, w=w, c1=c1, c2=c2)  # type: ignore
         
         # Run PSO
         best_x, best_y = pso.run()
         
-        return best_x.tolist(), float(best_y)
+        # End the final iteration
+        if self.current_optimization_iteration > 0:
+            self.progress_logger.end_iteration(self.current_optimization_iteration)
+        
+        # Ensure best_y is a scalar value
+        if hasattr(best_y, 'item'):
+            best_y = best_y.item()  # Convert numpy scalar to Python scalar
+        elif isinstance(best_y, np.ndarray):
+            best_y = float(best_y[0])  # Take first element if array
+        else:
+            best_y = float(best_y)  # Regular float conversion for other cases
+        
+        return best_x.tolist(), best_y
 
     @SearchMethodRegistry.register('ga')
     @search_method_decorator('ga')
     def search_ga(self,
                   iterations: Optional[int] = None,
-                  pop_size: int = 50,
-                  prob_mut: float = 0.1) -> Tuple[List[float], float]:
+                  pop_size: Optional[int] = None,
+                  prob_mut: Optional[float] = None) -> Tuple[List[float], float]:
         """
         Genetic Algorithm search method.
         
@@ -751,22 +985,48 @@ class ScenarioFuzzer:
             
         if iterations is None:
             iterations = self.num_iterations
+        if pop_size is None:
+            pop_size = self.ga_pop_size
+        if prob_mut is None:
+            prob_mut = self.ga_prob_mut
             
         if not self._search_bounds:
             raise ValueError("No search bounds available for optimization")
+        
+        # Calculate GA max_iter before logging
+        # GA max_iter is inclusive, so subtract 1 to get the desired number of iterations
+        # Special case: if user wants 1 iteration, set max_iter to 0 (will run iteration 0 only)
+        ga_max_iter = max(0, iterations - 1)  # Allow 0 for single iteration case
             
         self.logger.info(f"Starting GA search with {iterations} generations, population size {pop_size}")
+        self.logger.info(f"GA parameters: prob_mut={prob_mut}")
+        self.logger.info(f"GA max_iter adjusted to {ga_max_iter} (user requested {iterations} iterations)")
+        
+        # Start experiment progress logging
+        self.progress_logger.start_experiment(iterations)
+        
+        # Set population size for progress tracking
+        self.population_size = pop_size
+        self.current_optimization_iteration = 1
+        self.current_population_index = 0
+        
+        # Start first iteration explicitly for GA
+        self.progress_logger.start_iteration(1)
         
         # Setup GA
         n_dim = len(self._search_bounds)
         lb = [bound[0] for bound in self._search_bounds]
         ub = [bound[1] for bound in self._search_bounds]
         
-        ga = GA(func=self._evaluate_scenario, n_dim=n_dim, size_pop=pop_size, max_iter=iterations,
+        ga = GA(func=self._evaluate_scenario, n_dim=n_dim, size_pop=pop_size, max_iter=ga_max_iter,
                 lb=lb, ub=ub, prob_mut=prob_mut, precision=1e-7)  # type: ignore
         
         # Run GA
         best_x, best_y = ga.run()
+        
+        # End the final iteration
+        if self.current_optimization_iteration > 0:
+            self.progress_logger.end_iteration(self.current_optimization_iteration)
         
         return best_x.tolist(), float(best_y)
 
@@ -824,11 +1084,74 @@ class ScenarioFuzzer:
                 subprocess.run(cmd, capture_output=True, check=False)
             except Exception as e:
                 self.logger.debug(f"Error killing {process}: {e}")
+        
+        # Additional cleanup for traffic manager processes
+        try:
+            # Kill any processes using CARLA ports
+            for port in [2000, 2001, 2002, 8000, 8001, 8002]:
+                cmd = ["fuser", "-k", f"{port}/tcp"]
+                subprocess.run(cmd, capture_output=True, check=False, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            self.logger.debug(f"Error killing port processes: {e}")
                 
         if force:
-            time.sleep(3)
+            time.sleep(5)
         else:
-            time.sleep(2)
+            time.sleep(3)
+            
+    def _restart_apollo_container(self):
+        """Restart Apollo Docker container."""
+        if self.agent != "apollo":
+            return
+            
+        container_name = self._get_apollo_container_name()
+        self.logger.info(f"Restarting Apollo Docker container: {container_name}")
+        try:
+            # Restart Apollo container
+            cmd = f"docker ps -aqf 'name={container_name}' | xargs -r docker restart"
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                self.logger.info("Apollo container restarted successfully")
+                time.sleep(2)  # Give container time to restart
+            else:
+                self.logger.warning(f"Apollo container restart failed: {result.stderr.decode()}")
+                
+        except subprocess.TimeoutExpired:
+            self.logger.error("Apollo container restart timed out")
+        except Exception as e:
+            self.logger.error(f"Error restarting Apollo container: {e}")
+            
+    def _is_apollo_container_running(self) -> bool:
+        """Check if Apollo Docker container is running."""
+        if self.agent != "apollo":
+            return True  # Not relevant for non-Apollo agents
+            
+        container_name = self._get_apollo_container_name()
+        try:
+            cmd = f"docker ps --filter 'name={container_name}' --filter 'status=running' --quiet"
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10
+            )
+            
+            is_running = len(result.stdout.strip()) > 0
+            if not is_running:
+                self.logger.warning(f"Apollo container '{container_name}' is not running")
+            return is_running
+            
+        except Exception as e:
+            self.logger.error(f"Error checking Apollo container status: {e}")
+            return False
             
     def is_carla_responsive(self) -> bool:
         """Check if Carla is running and responsive."""
@@ -841,13 +1164,25 @@ class ScenarioFuzzer:
             
     def start_carla(self):
         """Start Carla simulator."""
-        self.logger.info("Starting Carla simulator...")
+        self.logger.info(f"Starting Carla simulator for {self.agent} agent...")
         
-        # Kill any existing instances
+        # Kill any existing instances more thoroughly
+        self.logger.info("Cleaning up any existing CARLA processes...")
         self.kill_carla_processes(force=True)
         
+        # Apollo-specific container check
+        if self.agent == "apollo":
+            self.logger.info("Checking Apollo container status...")
+            if not self._is_apollo_container_running():
+                self.logger.warning("Apollo container not running, starting it...")
+                self._restart_apollo_container()
+        
+        # Wait a bit more for cleanup
+        time.sleep(3)
+        
         # Prepare command
-        cmd = ["./CarlaUE4.sh", "-quality-level=Low"]
+        # Change quality to low if you suffer from performance issues
+        cmd = ["./CarlaUE4.sh", "-quality-level=Epic", "-world-port=2000", "-tm-port=8000"]
         if self.headless:
             cmd.append("-RenderOffScreen")
             
@@ -864,10 +1199,16 @@ class ScenarioFuzzer:
             self.carla_running = True
             self.runs_since_restart = 0
             
-            # Wait for initialization
-            self.logger.info("Waiting for Carla to initialize...")
-            time.sleep(10)
+            # Wait longer for initialization, especially for Apollo
+            initialization_time = 20 if self.agent == "apollo" else 15
+            self.logger.info(f"Waiting for Carla to initialize ({initialization_time}s)...")
+            time.sleep(initialization_time)
             
+            # Check if CARLA is actually running
+            if not self.is_carla_responsive():
+                raise Exception("CARLA failed to start properly")
+            
+            self.logger.info(f"CARLA started successfully for {self.agent} agent")
             return True
             
         except Exception as e:
@@ -877,14 +1218,25 @@ class ScenarioFuzzer:
     def run_simulation_with_timeout(self, run_num: int) -> int:
         """Run a single simulation with timeout."""
         self.logger.info(f"Running simulation with route ID {self.route_id} "
-                        f"from file {self.route_file} (timeout: {self.timeout_seconds}s)...")
+                        f"from file {self.route_file} using {self.agent} agent (timeout: {self.timeout_seconds}s)...")
+        
+        # Check Apollo container status before simulation
+        if self.agent == "apollo" and not self._is_apollo_container_running():
+            self.logger.warning("Apollo container not running, attempting to restart...")
+            self._restart_apollo_container()
+            if not self._is_apollo_container_running():
+                self.logger.error("Failed to start Apollo container, simulation may fail")
         
         # Prepare environment
         env = os.environ.copy()
         env["CURRENT_RUN_NUMBER"] = str(run_num)
         
-        # Prepare command
-        simulate_script = self.script_dir / "simulate_ba.sh"
+        # Prepare command based on agent type
+        if self.agent == "apollo":
+            simulate_script = self.script_dir / "simulate_apollo.sh"
+        else:  # Default to BA agent
+            simulate_script = self.script_dir / "simulate_ba.sh"
+        
         cmd = ["bash", str(simulate_script), str(self.route_id), self.route_file]
         
         try:
@@ -905,13 +1257,31 @@ class ScenarioFuzzer:
                 self.logger.error(f"Simulation failed with exit code {result.returncode}")
                 if result.stderr:
                     self.logger.debug(f"Error output: {result.stderr}")
+                
+                # Apollo-specific error recovery
+                if self.agent == "apollo":
+                    self.logger.info("Attempting Apollo container restart due to simulation failure...")
+                    self._restart_apollo_container()
+                
                 return result.returncode
                 
         except subprocess.TimeoutExpired:
             self.logger.error(f"Simulation TIMED OUT after {self.timeout_seconds} seconds!")
+            
+            # Apollo-specific timeout recovery
+            if self.agent == "apollo":
+                self.logger.info("Restarting Apollo container due to timeout...")
+                self._restart_apollo_container()
+            
             return 124  # Timeout exit code
         except Exception as e:
             self.logger.error(f"Error running simulation: {e}")
+            
+            # Apollo-specific error recovery
+            if self.agent == "apollo":
+                self.logger.info("Restarting Apollo container due to unexpected error...")
+                self._restart_apollo_container()
+            
             return 1
 
     def process_epoch_result(self, run_num: int) -> Dict:
@@ -1126,6 +1496,13 @@ class ScenarioFuzzer:
         """Cleanup all processes and restore terminal."""
         self.logger.info("Cleaning up processes...")
         self.kill_carla_processes(force=True)
+        
+        # Apollo-specific cleanup
+        if self.agent == "apollo":
+            self.logger.info("Performing Apollo-specific cleanup...")
+            # Note: We don't stop the Apollo container as it may be used by other processes
+            # Just ensure it's in a clean state
+            
         self._restore_terminal()
 
 
@@ -1136,17 +1513,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Random search
+  # Random search with Behavior Agent
   python sim_runner.py 1 --method random --iterations 20
   
-  # PSO search  
-  python sim_runner.py 1 --method pso --iterations 50
+  # PSO search with Apollo agent
+  python sim_runner.py 1 --method pso --iterations 50 --agent apollo
   
   # GA search with custom parameters
   python sim_runner.py 2 --method ga --iterations 30 --headless
   
-  # Custom route file
-  python sim_runner.py 3 --route-file routes_custom --method pso
+  # Apollo agent with custom route file
+  python sim_runner.py 3 --route-file routes_custom --method pso --agent apollo
         """
     )
     
@@ -1169,6 +1546,24 @@ Examples:
     parser.add_argument("--reward-function", type=str, default="ttc",
                        help="Reward function to use for optimization. "
                             "Available: collision, distance, safety_margin, ttc, ttc_div_dist, weighted_multi (default: ttc)")
+    parser.add_argument("--agent", type=str, default="ba", choices=['ba', 'apollo'],
+                       help="Agent type to use: 'ba' for Behavior Agent, 'apollo' for Apollo (default: ba)")
+    
+    # PSO parameters
+    parser.add_argument("--pso-pop-size", type=int, default=20,
+                       help="PSO population size (default: 20)")
+    parser.add_argument("--pso-w", type=float, default=0.8,
+                       help="PSO inertia weight (default: 0.8)")
+    parser.add_argument("--pso-c1", type=float, default=0.5,
+                       help="PSO cognitive parameter (default: 0.5)")
+    parser.add_argument("--pso-c2", type=float, default=0.5,
+                       help="PSO social parameter (default: 0.5)")
+    
+    # GA parameters
+    parser.add_argument("--ga-pop-size", type=int, default=50,
+                       help="GA population size (default: 50)")
+    parser.add_argument("--ga-prob-mut", type=float, default=0.1,
+                       help="GA mutation probability (default: 0.1)")
     
     args = parser.parse_args()
     
@@ -1206,7 +1601,16 @@ Examples:
         headless=args.headless,
         random_seed=args.seed,
         restart_gap=args.restart_gap,
-        reward_function=args.reward_function
+        reward_function=args.reward_function,
+        agent=args.agent,
+        # PSO parameters
+        pso_pop_size=getattr(args, 'pso_pop_size', 20),
+        pso_w=getattr(args, 'pso_w', 0.8),
+        pso_c1=getattr(args, 'pso_c1', 0.5),
+        pso_c2=getattr(args, 'pso_c2', 0.5),
+        # GA parameters
+        ga_pop_size=getattr(args, 'ga_pop_size', 50),
+        ga_prob_mut=getattr(args, 'ga_prob_mut', 0.1)
     )
     
     try:

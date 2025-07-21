@@ -58,6 +58,7 @@ class ExperimentConfig(BaseModel):
     headless: bool = Field(default=False, description="Run CARLA headless")
     random_seed: int = Field(default=42, description="Random seed for reproducibility")
     reward_function: RewardFunctionEnum = Field(default=RewardFunctionEnum.TTC, description="Reward function")
+    agent: str = Field(default="ba", description="Agent type (ba for Behavior Agent, apollo for Apollo)")
     parameter_overrides: Optional[Dict[str, Tuple[float, float]]] = Field(
         default=None, 
         description="Custom parameter ranges"
@@ -71,6 +72,14 @@ class ExperimentConfig(BaseModel):
     
     ga_pop_size: Optional[int] = Field(default=50, ge=1, le=500, description="GA population size")
     ga_prob_mut: Optional[float] = Field(default=0.1, ge=0.01, le=0.5, description="GA mutation probability")
+    
+    @validator('agent')
+    def validate_agent(cls, v):
+        """Validate agent type."""
+        valid_agents = ['ba', 'apollo']
+        if v not in valid_agents:
+            raise ValueError(f"Invalid agent '{v}'. Must be one of: {valid_agents}")
+        return v
     
     @validator('parameter_overrides')
     def validate_parameter_ranges(cls, v):

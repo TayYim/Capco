@@ -796,7 +796,8 @@ class ExperimentService:
                 "--route-file", config_dict["route_file"],
                 "--timeout", str(config_dict["timeout_seconds"]),
                 "--seed", str(config_dict["random_seed"]),
-                "--reward-function", config_dict["reward_function"]
+                "--reward-function", config_dict["reward_function"],
+                "--agent", config_dict.get("agent", "ba")  # Add agent parameter with default
             ]
             
             # Add PSO parameters if using PSO method
