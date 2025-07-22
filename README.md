@@ -1,55 +1,52 @@
-# Carlo: Automating Apollo-Co-Simulation and Scenario Fuzzing in Carla
+# CapCo: Automating Carla-Apollo Co-Simulation and Scenario Fuzzing
 
-**Carlo** is an open-source tool that automates the co-simulation of the **Apollo autonomous driving system** within the **Carla simulator**, enabling iterative scenario testing with customizable fuzzing and evaluation pipelines.
+**CapCo** is an open-source framework that automates the closed-loop co-simulation between the **Carla simulator** and the **Apollo autonomous driving system**. It streamlines scenario-based testing and enables systematic evaluation of ADS safety across multiple versions of Apollo.
 
-> 🚗 Built for ADS researchers and engineers, Carlo lets you execute, fuzz, and evaluate traffic scenarios across different Apollo versions in a reproducible and extensible framework.
-
----
-
-## 🎯 Features
-
-- 🔁 **Apollo-Carla Co-Simulation**  
-  Seamless integration of Apollo with Carla, supporting multi-version Apollo testing (e.g., v7.0, v8.0, v9.0).
-
-- 🧪 **Scenario-Based Testing**  
-  Supports scenarios defined in OpenScenario or BehaviorTree formats, with automatic loading and execution.
-
-- 🧬 **Scenario Fuzzing & Mutation**  
-  Enables iterative testing via user-selectable searchers (e.g., Random, PSO, GA) to mutate scenario parameters.
-
-- 📊 **Evaluation and Reporting**  
-  Collects runtime metrics (e.g., collisions, time-to-collision, trajectory) and exports structured evaluation reports (CSV + visualizations).
-
-- 🧑‍💻 **Interactive UI**  
-  Web-based interface for scenario configuration, Apollo version selection, progress tracking, and result visualization.
+> 🔧 Designed for ADS developers and researchers, CapCo simplifies the setup, execution, and analysis of co-simulation tests, with support for fuzzing strategies, scenario risk control, and batch evaluation.
 
 ---
 
-## 🧱 System Architecture
+## 🔍 Key Features
+
+- 🔄 **Closed-Loop Carla-Apollo Co-Simulation**  
+  Automates simulation lifecycle: scenario launch, Apollo runtime configuration, and synchronized execution.
+
+- 🧠 **Fuzzing-Driven Testing**  
+  Includes multiple scenario search strategies (e.g., PSO, GA).
+
+- 🧰 **Modular Architecture**  
+  Supports extension for new scenario formats, ADS models, metrics, and search strategies.
+
+- 🖥️ **Lightweight Interactive UI**  
+  Optional frontend to configure runs and visualize scenario/test results.
+
+---
+
+## 🧱 System Overview
 
 ```
 +--------------------------+
-|   Web Frontend (UI)     |  <-- Scenario config, fuzzer choice, run logs, charts
+|    Web Interface (UI)   |  <-- Configure scenario & Apollo, monitor results
 +--------------------------+
             |
             v
 +--------------------------+
-| Backend Controller (API)|  <-- Launch Carla + Apollo, loop over iterations
+|   Backend Controller    |  <-- Manages lifecycle, search, data collection
 +--------------------------+
             |
             v
 +--------------------------+
-| Carla + Apollo Runtime  |  <-- Co-simulation per scenario
+| Carla + Apollo Runtime  |  <-- Co-simulation engine
 +--------------------------+
             |
             v
 +--------------------------+
-|   Metrics Collector     |  <-- Log parsing, performance metrics
+|      Metric Logger      |  <-- Collision stats, TTC, trajectory, logs
 +--------------------------+
             |
             v
 +--------------------------+
-|      Report Engine      |  <-- CSV export, visual charts, summary
+|     Report Generator    |  <-- CSV + chart export, scoring
 +--------------------------+
 ```
 
@@ -58,88 +55,86 @@
 ## 🚀 Getting Started
 
 ### Prerequisites
-
 - Docker (required)
 - NVIDIA GPU + CUDA drivers
 - Ubuntu 20.04/22.04
 
-### Quick Setup (in development)
-
+### Quick Setup
 ```bash
-# Clone the repository
-git clone https://github.com/TayYim/Carlo.git
-cd carlo
+# Clone the repo
+git clone https://github.com/TayYim/CapCo.git
+cd CapCo
 ```
 
-Then go to dependencies and install the requirements
-```
+Set up dependencies:
+```bash
 cd dependencies
 
-git clone https://github.com/TayYim/scenario_runner.git -b carlo
+git clone https://github.com/TayYim/scenario_runner.git -b capco
 
-git clone https://github.com/TayYim/leaderboard.git -b carlo
+git clone https://github.com/TayYim/leaderboard.git -b capco
 ```
 
-Then install the requirements using the python environment for Carla
-```
+Install requirements:
+```bash
 pip install -r requirements.txt
 ```
 
-Also need to create a new python environment for the project
-```
-conda create -n carlo python=3.12
-conda activate carlo
+Optional: create Python environment
+```bash
+conda create -n capco python=3.12
+conda activate capco
 ```
 
-
-
-```
-# Launch system using Docker Compose (planned)
+Planned Docker integration:
+```bash
 docker-compose up
 ```
-
-> The Docker image bundles Carla, Apollo, and required bridges. See `docs/install.md` for manual setup if needed.
+> Manual setup is also supported. See `docs/install.md` for detailed instructions.
 
 ---
 
 ## 🧪 Usage Workflow
 
-1. **Select Apollo Version & Scenario**
-2. **Choose Searcher**: PSO, GA, or Random
-3. **Configure Fuzzing Loop**: Set number of iterations
-4. **Launch Simulation**: Each scenario is executed in Carla with Apollo control
-5. **Collect Results**: Reports and charts generated per iteration
-6. **Download Reports**: Raw logs + summaries + CSV/plot files
+1. **Select Scenario & Apollo Version**
+2. **Choose Risk Level / Search Strategy** (e.g., PSO, GA)
+3. **Configure Test Loop**: Set number of runs, mutation budget
+4. **Launch Co-Simulation**: Each scenario is tested with Apollo
+5. **Record Results**: Collisions, TTC, distance, score
+6. **Generate Report**: CSV logs + charts + safety ranking
 
 ---
 
-## 📁 Project Structure
-
+## 📁 Directory Structure
 ```
-carlo/
-├── frontend/           # Web UI (Streamlit or Flask+React)
-├── backend/            # Core controller logic
-├── runner/             # Carla-Apollo runtime setup
-├── fuzz/               # Scenario searchers (GA, PSO, etc.)
-├── evaluator/          # Metric computation, scoring
-├── scenarios/          # Sample scenarios in OpenScenario or BT
-├── reports/            # Logs, charts, exportable outputs
-├── Dockerfile
-├── docker-compose.yml
+Capco/
+├── src/                      # Main source code
+│   ├── frontend/             # React web UI (localhost:3000)
+│   ├── backend/              # FastAPI server (localhost:8089)
+│   ├── simulation/           # CARLA simulation runner & scripts
+│   └── utils/                # Shared utilities
+├── dependencies/             # External dependencies
+│   ├── leaderboard/          # CARLA Leaderboard scenarios
+│   └── scenario_runner/      # CARLA Scenario Runner
+├── config/                   # Configuration files
+│   ├── parameter_ranges.yaml # Fuzzing parameter definitions
+│   └── apollo_config.yaml    # Apollo agent configuration
+├── docs/                     # Documentation
+├── output/                   # Experiment results & logs
+├── experiments.db            # SQLite database
+├── env_config.json           # Environment configuration
+├── requirements.txt          # Python dependencies
 └── README.md
 ```
 
----
+<!-- ---
 
-## 📽️ Screencast & Demo
+## 🎥 Demo and Materials
 
-- Screencast (coming soon): [YouTube Link or local `demo.mp4`](#)
-- Sample test report: [report_example.pdf](./reports/report_example.pdf)
+- Screencast: [TBD link](#)
+- Sample Report: [report_example.pdf](./reports/report_example.pdf)
+- Paper: See [ASE 2025 Tool Demo Submission](#) -->
 
----
 
-## 🔓 License
-
-MIT License. See [LICENSE](./LICENSE) for details.
 
 ---
