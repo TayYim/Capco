@@ -1,0 +1,9 @@
+# Apollo Agent Configuration
+# Simple configuration for Apollo container and user settings
+
+# Apollo Docker container name
+container_name: "apollo_dev_tay"
+
+# User name for Docker exec commands
+# Set to null to auto-detect current system user
+user_name: null 
