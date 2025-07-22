@@ -240,7 +240,8 @@ class ExperimentService:
                         "timeout_seconds": getattr(record, 'timeout_seconds', 300),
                         "headless": getattr(record, 'headless', False),
                         "random_seed": getattr(record, 'random_seed', 42),
-                        "reward_function": getattr(record, 'reward_function', 'ttc')
+                        "reward_function": getattr(record, 'reward_function', 'ttc'),
+                        "agent": getattr(record, 'agent', 'ba')
                     },
                     "created_at": created_at.isoformat() if created_at else None,
                     "started_at": started_at.isoformat() if started_at else None,
@@ -326,6 +327,7 @@ class ExperimentService:
                 headless=config.headless,
                 random_seed=config.random_seed,
                 reward_function=config.reward_function.value,
+                agent=config.agent,
                 output_directory=str(output_dir),
                 **db_params
             )
@@ -528,6 +530,7 @@ class ExperimentService:
                 route_id=config.get("route_id", "unknown"),
                 route_file=config.get("route_file", "unknown"),
                 search_method=config.get("search_method", "unknown"),
+                agent=config.get("agent", "ba"),
                 created_at=created_at,
                 completed_at=completed_at,
                 collision_found=progress.get("collision_found", False),
@@ -653,7 +656,8 @@ class ExperimentService:
             timeout_seconds=original_config.get("timeout_seconds", 300),
             headless=original_config.get("headless", False),
             random_seed=original_config.get("random_seed", 42),
-            reward_function=RewardFunctionEnum(original_config.get("reward_function", "ttc"))
+            reward_function=RewardFunctionEnum(original_config.get("reward_function", "ttc")),
+            agent=original_config.get("agent", "ba")
         )
         
         # Create the duplicated experiment

@@ -24,17 +24,19 @@ export function HistoryPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [methodFilter, setMethodFilter] = useState<string>('')
+  const [agentFilter, setAgentFilter] = useState<string>('')
   const [limit, setLimit] = useState(20)
   const [offset, setOffset] = useState(0)
   const queryClient = useQueryClient()
 
   const { data: experiments, isLoading } = useQuery({
-    queryKey: ['experiments', { limit, offset, statusFilter, methodFilter, search: searchQuery }],
+    queryKey: ['experiments', { limit, offset, statusFilter, methodFilter, agentFilter, search: searchQuery }],
     queryFn: () => apiClient.listExperiments({
       limit,
       offset,
       status_filter: statusFilter || undefined,
       search_method: methodFilter || undefined,
+      // Note: Backend doesn't support agent filtering yet, will filter client-side
     }),
     refetchInterval: 5000, // Poll every 5 seconds for updated statuses
   })
@@ -93,11 +95,21 @@ export function HistoryPage() {
   })
 
   const filteredExperiments = experiments?.filter(experiment => {
-    if (!searchQuery) return true
-    const query = searchQuery.toLowerCase()
-    return experiment.name.toLowerCase().includes(query) ||
-           experiment.route_id.toLowerCase().includes(query) ||
-           experiment.route_file.toLowerCase().includes(query)
+    // Search query filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      const matchesSearch = experiment.name.toLowerCase().includes(query) ||
+                           experiment.route_id.toLowerCase().includes(query) ||
+                           experiment.route_file.toLowerCase().includes(query)
+      if (!matchesSearch) return false
+    }
+    
+    // Agent filter
+    if (agentFilter && experiment.agent !== agentFilter) {
+      return false
+    }
+    
+    return true
   })
 
   const getStatusIcon = (status: string) => {
@@ -228,6 +240,22 @@ export function HistoryPage() {
               <option value="ga">Genetic Algorithm</option>
             </select>
           </div>
+
+          {/* Agent Filter */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Agent
+            </label>
+            <select
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value)}
+              className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+            >
+              <option value="">All agents</option>
+              <option value="ba">🤖 Behavior Agent</option>
+              <option value="apollo">🚀 Apollo</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -261,6 +289,9 @@ export function HistoryPage() {
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Method
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Agent
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Progress
@@ -302,7 +333,7 @@ export function HistoryPage() {
               No experiments found
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {searchQuery || statusFilter || methodFilter
+              {searchQuery || statusFilter || methodFilter || agentFilter
                 ? 'Try adjusting your filters to see more results.'
                 : 'Get started by creating your first experiment.'
               }
@@ -473,6 +504,17 @@ function ExperimentRow({
 
       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
         {experiment.search_method.toUpperCase()}
+      </td>
+
+      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+        <span className={clsx(
+          'inline-flex items-center px-2 py-1 rounded text-xs font-medium',
+          experiment.agent === 'apollo' 
+            ? 'text-purple-800 bg-purple-100 dark:bg-purple-900 dark:text-purple-200'
+            : 'text-blue-800 bg-blue-100 dark:bg-blue-900 dark:text-blue-200'
+        )}>
+          {experiment.agent === 'apollo' ? '🚀 Apollo' : '🤖 BA'}
+        </span>
       </td>
 
       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">

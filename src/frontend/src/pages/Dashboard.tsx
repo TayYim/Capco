@@ -226,7 +226,7 @@ export function Dashboard() {
                         {experiment.name}
                       </Link>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Route {experiment.route_id} • {experiment.search_method} • {experiment.status}
+                        Route {experiment.route_id} • {experiment.search_method} • {experiment.agent === 'apollo' ? '🚀 Apollo' : '🤖 BA'} • {experiment.status}
                       </div>
                     </div>
                     

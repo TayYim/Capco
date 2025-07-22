@@ -195,6 +195,7 @@ class ExperimentListItem(BaseModel):
     route_id: str = Field(description="Route ID")
     route_file: str = Field(description="Route file")
     search_method: str = Field(description="Search method used")
+    agent: str = Field(default="ba", description="Agent type (ba or apollo)")
     status: ExperimentStatusEnum = Field(description="Current status")
     created_at: datetime = Field(description="Creation timestamp")
     completed_at: Optional[datetime] = Field(description="Completion timestamp")

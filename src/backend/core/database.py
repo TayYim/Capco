@@ -41,6 +41,7 @@ class ExperimentRecord(Base):
     headless = Column(Boolean, default=False)
     random_seed = Column(Integer, default=42)
     reward_function = Column(String, default="ttc")
+    agent = Column(String, default="ba")  # Agent type: ba (Behavior Agent) or apollo (Apollo)
     
     # Method-specific parameters
     pso_pop_size = Column(Integer, nullable=True)

@@ -19,6 +19,7 @@ import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { apiClient } from '../services/api'
 import type { ExperimentConfig, ExperimentData } from '../types'
+import { AGENT_OPTIONS } from '../types/experiment'
 import { LogViewer } from '../components/common/LogViewer'
 import { RewardChart } from '../components/common/RewardChart'
 import { generateExperimentName } from '../utils/nameGenerator'
@@ -31,6 +32,7 @@ const experimentSchema = z.object({
   route_id: z.string().min(1, 'Route ID is required'),
   route_file: z.string().min(1, 'Route file is required'),
   search_method: z.enum(['random', 'pso', 'ga']),
+  agent: z.enum(['ba', 'apollo']),
   num_iterations: z.number().min(1).max(10000),
   timeout_seconds: z.number().min(30).max(3600),
   headless: z.boolean(),
@@ -101,6 +103,7 @@ export function ExperimentPage() {
     defaultValues: {
       name: generateExperimentName('mixed'),
       search_method: 'random',
+      agent: 'ba',
       num_iterations: 100,
       timeout_seconds: 300,
       headless: false,
@@ -133,6 +136,7 @@ export function ExperimentPage() {
       setValue('route_id', config.route_id)
       setValue('route_file', config.route_file)
       setValue('search_method', config.search_method)
+      setValue('agent', (config.agent || 'ba') as 'ba' | 'apollo')
       setValue('num_iterations', config.num_iterations)
       setValue('timeout_seconds', config.timeout_seconds)
       setValue('headless', config.headless)
@@ -247,6 +251,7 @@ export function ExperimentPage() {
       route_id: data.route_id,
       route_file: data.route_file,
       search_method: data.search_method,
+      agent: data.agent,
       num_iterations: data.num_iterations,
       timeout_seconds: data.timeout_seconds,
       headless: data.headless,
@@ -523,6 +528,26 @@ export function ExperimentPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Agent Type
+                </label>
+                <select
+                  {...register('agent')}
+                  disabled={!isEditingConfig}
+                  className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-600"
+                >
+                  {AGENT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {AGENT_OPTIONS.find(opt => opt.value === watch('agent'))?.description}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Iterations
                 </label>
                 <input
@@ -535,7 +560,9 @@ export function ExperimentPage() {
                   <p className="mt-1 text-sm text-red-600">{errors.num_iterations.message}</p>
                 )}
               </div>
+            </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Timeout (seconds)
@@ -550,9 +577,7 @@ export function ExperimentPage() {
                   <p className="mt-1 text-sm text-red-600">{errors.timeout_seconds.message}</p>
                 )}
               </div>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Reward Function
@@ -831,7 +856,7 @@ function ExperimentStatus({ experiment }: { experiment: ExperimentData }) {
             {experiment.name}
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Route: {experiment.config.route_id} • File: {experiment.config.route_file}
+            Route: {experiment.config.route_id} • File: {experiment.config.route_file} • Agent: {experiment.config.agent === 'apollo' ? '🚀 Apollo' : '🤖 BA'}
           </p>
         </div>
         <span className={clsx(

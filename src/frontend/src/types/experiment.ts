@@ -7,6 +7,13 @@ export type SearchMethod = 'random' | 'pso' | 'ga'
 
 export type RewardFunction = 'collision' | 'distance' | 'safety_margin' | 'ttc' | 'ttc_div_dist' | 'weighted_multi'
 
+export type AgentType = 'ba' | 'apollo'
+
+export const AGENT_OPTIONS = [
+  { value: 'ba', label: 'Behavior Agent (BA)', description: 'Default CARLA behavior agent' },
+  { value: 'apollo', label: 'Apollo Agent', description: 'Baidu Apollo autonomous driving stack' }
+] as const
+
 export interface RewardDataPoint {
   scenario_number: number
   reward: number
@@ -24,6 +31,7 @@ export interface ExperimentConfig {
   headless: boolean
   random_seed: number
   reward_function: RewardFunction
+  agent: string
   parameter_overrides?: Record<string, [number, number]>
   
   // Search method specific parameters
@@ -112,6 +120,7 @@ export interface ExperimentListItem {
   route_id: string
   route_file: string
   search_method: string
+  agent: string
   status: ExperimentStatus
   created_at: string
   completed_at?: string
