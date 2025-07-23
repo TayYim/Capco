@@ -53,6 +53,7 @@ export interface ConfigurationUpdate {
 export interface ConfigurationStatus {
   is_valid: boolean
   carla_available: boolean
+  apollo_available: boolean
   parameter_ranges_loaded: boolean
   output_directory_writable: boolean
   errors: string[]

@@ -13,6 +13,9 @@ from typing import List, Optional, Dict, Any, Tuple
 import logging
 from datetime import datetime
 
+# Add path to find utilities in main src/utils directory
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from models.configuration import (
     SystemConfiguration, ConfigurationUpdate, ConfigurationStatus,
     ParameterRange, ParameterRangeUpdate, ParameterRangeImport,
@@ -20,6 +23,7 @@ from models.configuration import (
     SearchMethodConfig
 )
 from core.config import get_settings
+from utils import check_apollo_availability
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -142,6 +146,11 @@ class ParameterService:
             else:
                 errors.append(f"CARLA path does not exist: {carla_path}")
             
+            # Check Apollo availability
+            apollo_available = check_apollo_availability()
+            if not apollo_available:
+                errors.append("Apollo container not found or not accessible.")
+            
             # Check parameter ranges
             parameter_ranges_loaded = False
             try:
@@ -176,6 +185,7 @@ class ParameterService:
             return ConfigurationStatus(
                 is_valid=is_valid,
                 carla_available=carla_available,
+                apollo_available=apollo_available,
                 parameter_ranges_loaded=parameter_ranges_loaded,
                 output_directory_writable=output_directory_writable,
                 errors=errors,
@@ -187,6 +197,7 @@ class ParameterService:
             return ConfigurationStatus(
                 is_valid=False,
                 carla_available=False,
+                apollo_available=False,
                 parameter_ranges_loaded=False,
                 output_directory_writable=False,
                 errors=[f"Configuration check failed: {e}"],

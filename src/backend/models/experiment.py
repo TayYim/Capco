@@ -47,31 +47,35 @@ class RewardDataPoint(BaseModel):
 
 
 class ExperimentConfig(BaseModel):
-    """Configuration for creating a new experiment."""
+    """Configuration for a fuzzing experiment."""
     
-    name: str = Field(..., min_length=2, max_length=100, description="Human-readable experiment name")
-    route_id: str = Field(..., description="ID of the route to test")
-    route_file: str = Field(default="routes_carlo", description="Route file name")
-    search_method: SearchMethodEnum = Field(default=SearchMethodEnum.RANDOM, description="Search algorithm")
-    num_iterations: int = Field(default=10, ge=1, le=1000, description="Number of iterations")
-    timeout_seconds: int = Field(default=300, ge=30, le=3600, description="Timeout per simulation")
-    headless: bool = Field(default=False, description="Run CARLA headless")
-    random_seed: int = Field(default=42, description="Random seed for reproducibility")
-    reward_function: RewardFunctionEnum = Field(default=RewardFunctionEnum.TTC, description="Reward function")
-    agent: str = Field(default="ba", description="Agent type (ba for Behavior Agent, apollo for Apollo)")
-    parameter_overrides: Optional[Dict[str, Tuple[float, float]]] = Field(
-        default=None, 
-        description="Custom parameter ranges"
+    name: str = Field(description="Human-readable experiment name")
+    route_id: str = Field(description="Route identifier") 
+    route_name: Optional[str] = Field(description="Human-readable route name")
+    route_file: str = Field(description="Route file name")
+    search_method: SearchMethodEnum = Field(description="Search algorithm to use")
+    num_iterations: int = Field(description="Number of iterations to run", gt=0, le=10000)
+    timeout_seconds: int = Field(description="Timeout per scenario in seconds", gt=0, le=3600)
+    headless: bool = Field(description="Run in headless mode", default=False)
+    random_seed: int = Field(description="Random seed for reproducibility", ge=0)
+    reward_function: RewardFunctionEnum = Field(description="Reward function to use")
+    agent: str = Field(description="Agent type (ba or apollo)", default="ba")
+    
+    # Parameter overrides for specific parameters (optional)
+    parameter_overrides: Optional[Dict[str, List[float]]] = Field(
+        description="Parameter range overrides",
+        default=None
     )
     
-    # Search method specific parameters
-    pso_pop_size: Optional[int] = Field(default=20, ge=1, le=500, description="PSO population size")
-    pso_w: Optional[float] = Field(default=0.8, ge=0.1, le=2.0, description="PSO inertia weight")
-    pso_c1: Optional[float] = Field(default=0.5, ge=0.1, le=2.0, description="PSO cognitive parameter")
-    pso_c2: Optional[float] = Field(default=0.5, ge=0.1, le=2.0, description="PSO social parameter")
+    # PSO-specific parameters
+    pso_pop_size: Optional[int] = Field(description="PSO population size", default=20, gt=0, le=1000)
+    pso_w: Optional[float] = Field(description="PSO inertia weight", default=0.9, ge=0, le=2)
+    pso_c1: Optional[float] = Field(description="PSO cognitive coefficient", default=0.5, ge=0, le=4)
+    pso_c2: Optional[float] = Field(description="PSO social coefficient", default=0.3, ge=0, le=4)
     
-    ga_pop_size: Optional[int] = Field(default=50, ge=1, le=500, description="GA population size")
-    ga_prob_mut: Optional[float] = Field(default=0.1, ge=0.01, le=0.5, description="GA mutation probability")
+    # GA-specific parameters  
+    ga_pop_size: Optional[int] = Field(description="GA population size", default=30, gt=0, le=1000)
+    ga_prob_mut: Optional[float] = Field(description="GA mutation probability", default=0.1, ge=0, le=1)
     
     @validator('agent')
     def validate_agent(cls, v):
@@ -193,6 +197,7 @@ class ExperimentListItem(BaseModel):
     id: str = Field(description="Experiment ID")
     name: str = Field(description="Human-readable experiment name")
     route_id: str = Field(description="Route ID")
+    route_name: Optional[str] = Field(description="Human-readable route name")
     route_file: str = Field(description="Route file")
     search_method: str = Field(description="Search method used")
     agent: str = Field(default="ba", description="Agent type (ba or apollo)")

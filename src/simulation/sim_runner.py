@@ -228,7 +228,7 @@ class ScenarioFuzzer:
                  route_id: str,
                  search_method: str = "random",
                  num_iterations: int = 10,
-                 route_file: str = "routes_carlo",
+                 route_file: str = "default",
                  timeout_seconds: int = 300,
                  headless: bool = False,
                  parameter_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
@@ -1533,8 +1533,8 @@ Examples:
                        help="Search method to use (default: random)")
     parser.add_argument("--iterations", type=int, default=10,
                        help="Number of iterations/generations (default: 10)")
-    parser.add_argument("--route-file", type=str, default="routes_carlo",
-                       help="Name of the route file (default: routes_carlo)")
+    parser.add_argument("--route-file", type=str, default="default",
+                       help="Name of the route file (default: default)")
     parser.add_argument("--timeout", type=int, default=300,
                        help="Max seconds to wait for a simulation to complete (default: 300)")
     parser.add_argument("--headless", action="store_true",

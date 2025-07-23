@@ -26,7 +26,7 @@ fi
 # Process route name passed as second argument
 if [ -z "\$2" ]
 then
-    export ROUTE_FILE="routes_carlo"
+    export ROUTE_FILE="default"
 else
     export ROUTE_FILE=$2
 fi

@@ -56,6 +56,7 @@ class ScenarioService:
                         routes=[
                             RouteListItem(
                                 route_id=route["route_id"],
+                                route_name=route.get("route_name"),
                                 route_file=xml_file.stem,
                                 town=route.get("town"),
                                 scenario_count=len(route.get("scenarios", [])),
@@ -97,6 +98,7 @@ class ScenarioService:
             return [
                 RouteListItem(
                     route_id=route["route_id"],
+                    route_name=route.get("route_name"),
                     route_file=route_file,
                     town=route.get("town"),
                     scenario_count=len(route.get("scenarios", [])),
@@ -168,6 +170,7 @@ class ScenarioService:
             
             return RouteInfo(
                 route_id=route_id,
+                route_name=route_element.get("name"),
                 route_file=route_file,
                 town=route_element.get("town"),
                 scenarios=scenarios,
@@ -563,6 +566,9 @@ class ScenarioService:
                 if not route_id:
                     continue
                 
+                # Extract route name from XML (new feature)
+                route_name = route_element.get("name")
+                
                 scenarios = []
                 fuzzable_param_count = 0
                 primary_scenario_type = None
@@ -578,6 +584,7 @@ class ScenarioService:
                 
                 routes.append({
                     "route_id": route_id,
+                    "route_name": route_name,  # Include route name
                     "town": route_element.get("town"),
                     "scenarios": scenarios,
                     "fuzzable_parameter_count": fuzzable_param_count,

@@ -108,6 +108,7 @@ class ConfigurationStatus(BaseModel):
     
     is_valid: bool = Field(description="Whether configuration is valid")
     carla_available: bool = Field(description="Whether CARLA is accessible")
+    apollo_available: bool = Field(description="Whether Apollo container is available")
     parameter_ranges_loaded: bool = Field(description="Whether parameter ranges are loaded")
     output_directory_writable: bool = Field(description="Whether output directory is writable")
     errors: List[str] = Field(default=[], description="Configuration errors")

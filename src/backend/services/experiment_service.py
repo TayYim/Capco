@@ -188,12 +188,38 @@ class ExperimentService:
         # Calculate total scenarios
         total_scenarios = self._calculate_total_scenarios(search_method, num_iterations, population_size)
         
+        # Get current progress from database record
+        current_iteration = getattr(record, 'current_iteration', 0)
+        scenarios_executed = getattr(record, 'scenarios_executed', 0)
+        scenarios_this_iteration = getattr(record, 'scenarios_this_iteration', 0)
+        
+        # For completed experiments, ensure we show the final iteration count
+        experiment_status = getattr(record, 'status', 'created')
+        if experiment_status in ['completed', 'failed', 'stopped']:
+            # If current_iteration is 0 but experiment is completed, assume it completed all iterations
+            if current_iteration == 0 and scenarios_executed > 0:
+                # For random method, iteration count equals scenarios executed (since each iteration = 1 scenario)
+                if search_method == 'random':
+                    current_iteration = scenarios_executed
+                else:
+                    # For PSO/GA, if we have scenarios but no iteration count, estimate based on population size
+                    if population_size and population_size > 0:
+                        current_iteration = max(1, scenarios_executed // population_size)
+                    else:
+                        current_iteration = max(1, scenarios_executed // 10)  # Fallback estimate
+            
+            # Ensure current_iteration doesn't exceed total_iterations
+            current_iteration = min(current_iteration, num_iterations)
+            
+            logger.info(f"Reconstructed progress for completed experiment {getattr(record, 'id', 'unknown')}: "
+                       f"iteration {current_iteration}/{num_iterations}, scenarios {scenarios_executed}/{total_scenarios}")
+        
         return {
-            "current_iteration": getattr(record, 'current_iteration', 0),
+            "current_iteration": current_iteration,
             "total_iterations": num_iterations,
-            "scenarios_executed": getattr(record, 'scenarios_executed', 0),
+            "scenarios_executed": scenarios_executed,
             "total_scenarios": total_scenarios,
-            "scenarios_this_iteration": getattr(record, 'scenarios_this_iteration', 0),
+            "scenarios_this_iteration": scenarios_this_iteration,
             "best_reward": sanitize_float_value(getattr(record, 'best_reward', None)),
             "collision_found": getattr(record, 'collision_found', False) or False,
             "elapsed_time": None,  # Runtime-only data
@@ -207,56 +233,81 @@ class ExperimentService:
     def _load_experiments_from_database(self):
         """Load existing experiments from database to preserve history across restarts."""
         try:
+            logger.info("Loading experiments from database...")
+            
             # Load experiments from database
             experiment_records = list_experiment_records(limit=1000)  # Load recent experiments
             
+            if not experiment_records:
+                logger.info("No experiments found in database")
+                return
+            
+            loaded_count = 0
             for record in experiment_records:
-                # Safely extract values from database record
-                record_id = getattr(record, 'id', None)
-                if not record_id:
-                    continue
+                try:
+                    # Safely extract values from database record
+                    record_id = getattr(record, 'id', None)
+                    if not record_id:
+                        logger.warning("Found record with no ID, skipping")
+                        continue
+                        
+                    created_at = getattr(record, 'created_at', None)
+                    started_at = getattr(record, 'started_at', None)
+                    completed_at = getattr(record, 'completed_at', None)
                     
-                created_at = getattr(record, 'created_at', None)
-                started_at = getattr(record, 'started_at', None)
-                completed_at = getattr(record, 'completed_at', None)
-                
-                # Get experiment name (with fallback for legacy experiments)
-                experiment_name = getattr(record, 'name', None)
-                if not experiment_name:
-                    # Generate a name for legacy experiments without names
-                    experiment_name = f"Legacy Experiment {record_id[:8]}"
-                
-                # Convert database record to experiment status dictionary
-                experiment_status = {
-                    "id": record_id,
-                    "name": experiment_name,
-                    "status": getattr(record, 'status', 'created'),
-                    "config": {
+                    # Get experiment name (with fallback for legacy experiments)
+                    experiment_name = getattr(record, 'name', None)
+                    if not experiment_name:
+                        # Generate a name for legacy experiments without names
+                        experiment_name = f"Legacy Experiment {record_id[:8]}"
+                    
+                    # Convert database record to experiment status dictionary
+                    experiment_status = {
+                        "id": record_id,
                         "name": experiment_name,
-                        "route_id": getattr(record, 'route_id', ''),
-                        "route_file": getattr(record, 'route_file', ''),
-                        "search_method": getattr(record, 'search_method', 'random'),
-                        "num_iterations": getattr(record, 'num_iterations', 10),
-                        "timeout_seconds": getattr(record, 'timeout_seconds', 300),
-                        "headless": getattr(record, 'headless', False),
-                        "random_seed": getattr(record, 'random_seed', 42),
-                        "reward_function": getattr(record, 'reward_function', 'ttc'),
-                        "agent": getattr(record, 'agent', 'ba')
-                    },
-                    "created_at": created_at.isoformat() if created_at else None,
-                    "started_at": started_at.isoformat() if started_at else None,
-                    "completed_at": completed_at.isoformat() if completed_at else None,
-                    "error_message": getattr(record, 'error_message', None),
-                    "output_directory": getattr(record, 'output_directory', None),
-                    "progress": self._create_progress_from_database_record(record)
-                }
+                        "status": getattr(record, 'status', 'created'),
+                        "config": {
+                            "name": experiment_name,
+                            "route_id": getattr(record, 'route_id', ''),
+                            "route_name": getattr(record, 'route_name', None),  # Load route name from database
+                            "route_file": getattr(record, 'route_file', ''),
+                            "search_method": getattr(record, 'search_method', 'random'),
+                            "num_iterations": getattr(record, 'num_iterations', 10),
+                            "timeout_seconds": getattr(record, 'timeout_seconds', 300),
+                            "headless": getattr(record, 'headless', False),
+                            "random_seed": getattr(record, 'random_seed', 42),
+                            "reward_function": getattr(record, 'reward_function', 'ttc'),
+                            "agent": getattr(record, 'agent', 'ba')
+                        },
+                        "created_at": created_at.isoformat() if created_at else None,
+                        "started_at": started_at.isoformat() if started_at else None,
+                        "completed_at": completed_at.isoformat() if completed_at else None,
+                        "error_message": getattr(record, 'error_message', None),
+                        "output_directory": getattr(record, 'output_directory', None),
+                        "progress": self._create_progress_from_database_record(record)
+                    }
+                    
+                    # Store in memory
+                    self.experiment_status[record_id] = experiment_status
+                    loaded_count += 1
+                    
+                    logger.debug(f"Loaded experiment {record_id}: {experiment_name}")
+                    
+                except Exception as record_error:
+                    logger.error(f"Failed to load individual experiment record: {record_error}")
+                    continue
                 
-                self.experiment_status[record_id] = experiment_status
-                
-            logger.info(f"Loaded {len(experiment_records)} experiments from database")
+            logger.info(f"Successfully loaded {loaded_count} experiments from database")
+            
+            # Verify loading worked
+            if loaded_count > 0:
+                logger.info(f"Experiment IDs loaded: {list(self.experiment_status.keys())[:5]}...")  # Show first 5 IDs
             
         except Exception as e:
-            logger.warning(f"Failed to load experiments from database: {e}")
+            logger.error(f"CRITICAL: Failed to load experiments from database: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # Continue with empty status - new experiments can still be created
     
     async def create_experiment(
@@ -320,6 +371,7 @@ class ExperimentService:
                 experiment_id=experiment_id,
                 name=final_name,
                 route_id=config.route_id,
+                route_name=config.route_name,  # Save route name to database
                 route_file=config.route_file,
                 search_method=config.search_method.value,
                 num_iterations=config.num_iterations,
@@ -528,6 +580,7 @@ class ExperimentService:
                 name=status_dict.get("name", config.get("name", f"Experiment {exp_id[:8]}")),
                 status=status_enum,
                 route_id=config.get("route_id", "unknown"),
+                route_name=config.get("route_name"),  # Include route name
                 route_file=config.get("route_file", "unknown"),
                 search_method=config.get("search_method", "unknown"),
                 agent=config.get("agent", "ba"),
@@ -650,6 +703,7 @@ class ExperimentService:
         config = ExperimentConfig(
             name=new_name,
             route_id=original_config.get("route_id", ""),
+            route_name=original_config.get("route_name"),  # Include route name
             route_file=original_config.get("route_file", ""),
             search_method=SearchMethodEnum(original_config.get("search_method", "random")),
             num_iterations=original_config.get("num_iterations", 10),
@@ -969,6 +1023,19 @@ class ExperimentService:
             
             if return_code == 0 or has_results:
                 logger.info(f"Experiment {experiment_id} completed successfully (return_code={return_code}, has_results={has_results})")
+                
+                # Ensure final iteration count is set correctly for completed experiments
+                async with self._status_locks.get(experiment_id, asyncio.Lock()):
+                    status_dict = self.experiment_status.get(experiment_id, {})
+                    current_progress = status_dict.get("progress", {})
+                    total_iterations = status_dict.get("config", {}).get("num_iterations", 0)
+                    
+                    if current_progress and total_iterations > 0:
+                        current_iter = current_progress.get("current_iteration", 0)
+                        # If experiment completed successfully but current iteration is less than total, set it to total
+                        if current_iter < total_iterations:
+                            current_progress["current_iteration"] = total_iterations
+                            logger.info(f"Setting final iteration count for completed experiment {experiment_id}: {total_iterations}/{total_iterations}")
                 
                 await self._update_experiment_status(
                     experiment_id, 
@@ -1415,6 +1482,22 @@ class ExperimentService:
                         db_kwargs["best_reward"] = sanitized_reward
                 else:
                     db_kwargs[key] = value
+
+            # For completed experiments, save the final progress state to database
+            if status in [ExperimentStatusEnum.COMPLETED, ExperimentStatusEnum.FAILED, ExperimentStatusEnum.STOPPED]:
+                current_progress = status_dict.get("progress", {})
+                if current_progress:
+                    # Save all progress fields to database for persistence
+                    db_kwargs.update({
+                        "current_iteration": current_progress.get("current_iteration", 0),
+                        "scenarios_executed": current_progress.get("scenarios_executed", 0),
+                        "scenarios_this_iteration": current_progress.get("scenarios_this_iteration", 0),
+                        "best_reward": current_progress.get("best_reward"),
+                        "collision_found": current_progress.get("collision_found", False),
+                    })
+                    logger.info(f"Saving final progress for {experiment_id}: "
+                               f"iteration={current_progress.get('current_iteration')}/{current_progress.get('total_iterations')}, "
+                               f"scenarios={current_progress.get('scenarios_executed')}/{current_progress.get('total_scenarios')}")
             
             # Update additional fields (safe to do after preparing db_kwargs)
             for key, value in kwargs.items():
@@ -1434,6 +1517,7 @@ class ExperimentService:
         # Update database
         try:
             update_experiment_status(experiment_id, status.value, **db_kwargs)
+            logger.info(f"Updated database for {experiment_id} with status {status.value} and progress data")
         except Exception as e:
             logger.warning(f"Failed to update database for experiment {experiment_id}: {e}")
     

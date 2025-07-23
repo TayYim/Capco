@@ -58,7 +58,7 @@ async def get_scenario_statistics(
         "scenario_types": {},
         "parameter_statistics": [],
         "towns": ["Town04", "Town12", "Town13"],
-        "route_files": ["routes_carlo", "routes_training", "routes_validation", "routes_devtest"]
+        "route_files": ["default", "routes_training", "routes_validation", "routes_devtest"]
     }
 
 

@@ -39,6 +39,7 @@ class RouteInfo(BaseModel):
     """Information about a specific route."""
     
     route_id: str = Field(description="Route identifier")
+    route_name: Optional[str] = Field(description="Human-readable route name")
     route_file: str = Field(description="Route file name")
     town: Optional[str] = Field(description="CARLA town name")
     scenarios: List[ScenarioInfo] = Field(description="Scenarios in this route")
@@ -57,6 +58,7 @@ class RouteListItem(BaseModel):
     """Summary information for route list views."""
     
     route_id: str = Field(description="Route identifier")
+    route_name: Optional[str] = Field(description="Human-readable route name")
     route_file: str = Field(description="Route file name")
     town: Optional[str] = Field(description="CARLA town name")
     scenario_count: int = Field(description="Number of scenarios")

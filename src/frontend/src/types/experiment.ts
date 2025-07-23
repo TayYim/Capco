@@ -24,6 +24,7 @@ export interface RewardDataPoint {
 export interface ExperimentConfig {
   name: string
   route_id: string
+  route_name?: string
   route_file: string
   search_method: SearchMethod
   num_iterations: number
@@ -118,6 +119,7 @@ export interface ExperimentListItem {
   id: string
   name: string
   route_id: string
+  route_name?: string
   route_file: string
   search_method: string
   agent: string

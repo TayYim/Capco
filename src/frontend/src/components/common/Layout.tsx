@@ -136,7 +136,7 @@ export function Layout({ children }: LayoutProps) {
         {/* Page content */}
         <main className="flex-1 relative overflow-y-auto focus:outline-none">
           <div className="py-6">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+            <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-12">
               {children}
             </div>
           </div>
@@ -151,7 +151,7 @@ export function Layout({ children }: LayoutProps) {
         <div className="flex items-center flex-shrink-0 px-4">
           <ChartBarIcon className="h-8 w-8 text-indigo-600" />
           <span className="ml-2 text-xl font-bold text-gray-900 dark:text-white">
-            CARLA Fuzzer
+            CapCo
           </span>
         </div>
         

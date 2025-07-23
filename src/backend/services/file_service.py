@@ -36,7 +36,7 @@ class FileService:
         else:
             # If relative, assume it's relative to project root
             # Go up from services -> backend -> src -> project root
-            project_root = Path(__file__).parent.parent.parent.parent  # services -> backend -> src -> Carlo
+            project_root = Path(__file__).parent.parent.parent.parent  # services -> backend -> src -> project root
             self.output_base_dir = project_root / settings.output_dir
         self.max_preview_lines = 1000
         self.max_file_size_for_preview = 10 * 1024 * 1024  # 10MB

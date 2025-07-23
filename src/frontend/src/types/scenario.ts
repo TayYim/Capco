@@ -21,6 +21,7 @@ export interface ScenarioInfo {
 
 export interface RouteInfo {
   route_id: string
+  route_name?: string
   route_file: string
   town?: string
   scenarios: ScenarioInfo[]
@@ -33,6 +34,7 @@ export interface RouteInfo {
 
 export interface RouteListItem {
   route_id: string
+  route_name?: string
   route_file: string
   town?: string
   scenario_count: number

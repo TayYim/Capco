@@ -12,7 +12,11 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   ClockIcon,
-  DocumentDuplicateIcon
+  DocumentDuplicateIcon,
+  ChartBarIcon,
+  BeakerIcon,
+  FireIcon,
+  TrophyIcon
 } from '@heroicons/react/24/outline'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
@@ -99,8 +103,9 @@ export function HistoryPage() {
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
       const matchesSearch = experiment.name.toLowerCase().includes(query) ||
-                           experiment.route_id.toLowerCase().includes(query) ||
-                           experiment.route_file.toLowerCase().includes(query)
+                           (experiment.route_name || experiment.route_id).toLowerCase().includes(query) ||
+                           experiment.route_file.toLowerCase().includes(query) ||
+                           experiment.search_method.toLowerCase().includes(query)
       if (!matchesSearch) return false
     }
     
@@ -111,6 +116,19 @@ export function HistoryPage() {
     
     return true
   })
+
+  // Calculate summary statistics
+  const summaryStats = React.useMemo(() => {
+    if (!filteredExperiments) return null
+    
+    const total = filteredExperiments.length
+    const completed = filteredExperiments.filter(e => e.status === 'completed').length
+    const running = filteredExperiments.filter(e => e.status === 'running').length
+    const failed = filteredExperiments.filter(e => e.status === 'failed').length
+    const withCollisions = filteredExperiments.filter(e => e.collision_found === true).length
+    
+    return { total, completed, running, failed, withCollisions }
+  }, [filteredExperiments])
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -161,37 +179,106 @@ export function HistoryPage() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-6"
+      className="space-y-8"
     >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white">
             Experiment History
           </h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            View and manage your fuzzing experiments
+          <p className="mt-2 text-lg text-gray-600 dark:text-gray-400">
+            View, manage, and analyze your fuzzing experiments
           </p>
         </div>
 
         <Link
           to="/experiment"
-          className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          className="inline-flex items-center px-6 py-3 border border-transparent shadow-sm text-base font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200"
         >
-          <PlayIcon className="h-4 w-4 mr-2" />
+          <PlayIcon className="h-5 w-5 mr-2" />
           New Experiment
         </Link>
       </div>
 
+      {/* Summary Statistics */}
+      {summaryStats && (
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{summaryStats.total}</p>
+              </div>
+              <div className="p-3 bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-400 rounded-full">
+                <BeakerIcon className="h-6 w-6" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border-l-4 border-green-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Completed</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{summaryStats.completed}</p>
+              </div>
+              <div className="p-3 bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400 rounded-full">
+                <TrophyIcon className="h-6 w-6" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Running</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{summaryStats.running}</p>
+              </div>
+              <div className="p-3 bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-400 rounded-full">
+                <ChartBarIcon className="h-6 w-6" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border-l-4 border-red-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Failed</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{summaryStats.failed}</p>
+              </div>
+              <div className="p-3 bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400 rounded-full">
+                <XCircleIcon className="h-6 w-6" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border-l-4 border-orange-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Collisions</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{summaryStats.withCollisions}</p>
+              </div>
+              <div className="p-3 bg-orange-100 text-orange-600 dark:bg-orange-900 dark:text-orange-400 rounded-full">
+                <FireIcon className="h-6 w-6" />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filters */}
-      <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="bg-white dark:bg-gray-800 shadow-lg rounded-xl p-6">
+        <div className="flex items-center mb-4">
+          <FunnelIcon className="h-5 w-5 text-gray-400 mr-2" />
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Filters</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Search */}
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <div className="lg:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Search
             </label>
-            <div className="mt-1 relative rounded-md shadow-sm">
+            <div className="relative rounded-md shadow-sm">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <MagnifyingGlassIcon className="h-5 w-5 text-gray-400" />
               </div>
@@ -199,7 +286,7 @@ export function HistoryPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="block w-full pl-10 border-gray-300 dark:border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+                className="block w-full pl-10 border-gray-300 dark:border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
                 placeholder="Search by name, route ID, or file..."
               />
             </div>
@@ -207,13 +294,13 @@ export function HistoryPage() {
 
           {/* Status Filter */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Status
             </label>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+              className="block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
             >
               <option value="">All statuses</option>
               <option value="completed">Completed</option>
@@ -226,13 +313,13 @@ export function HistoryPage() {
 
           {/* Method Filter */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Method
             </label>
             <select
               value={methodFilter}
               onChange={(e) => setMethodFilter(e.target.value)}
-              className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+              className="block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
             >
               <option value="">All methods</option>
               <option value="random">Random</option>
@@ -243,13 +330,13 @@ export function HistoryPage() {
 
           {/* Agent Filter */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Agent
             </label>
             <select
               value={agentFilter}
               onChange={(e) => setAgentFilter(e.target.value)}
-              className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+              className="block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
             >
               <option value="">All agents</option>
               <option value="ba">🤖 Behavior Agent</option>
@@ -260,18 +347,18 @@ export function HistoryPage() {
       </div>
 
       {/* Experiments Table */}
-      <div className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-lg">
+      <div className="bg-white dark:bg-gray-800 shadow-lg overflow-hidden rounded-xl">
         {isLoading ? (
           <div className="p-8">
             <div className="animate-pulse space-y-4">
-              {[...Array(5)].map((_, i) => (
+              {[...Array(8)].map((_, i) => (
                 <div key={i} className="flex items-center space-x-4">
-                  <div className="h-10 w-10 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
+                  <div className="h-12 w-12 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
                   <div className="flex-1 space-y-2">
                     <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
                     <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
                   </div>
-                  <div className="h-8 w-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                  <div className="h-8 w-24 bg-gray-200 dark:bg-gray-700 rounded"></div>
                 </div>
               ))}
             </div>
@@ -281,31 +368,31 @@ export function HistoryPage() {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Experiment
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Method
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Agent
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Progress
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Results
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Duration
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Created
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
@@ -327,23 +414,23 @@ export function HistoryPage() {
             </table>
           </div>
         ) : (
-          <div className="text-center py-12">
-            <ClockIcon className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">
-              No experiments found
-            </h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {searchQuery || statusFilter || methodFilter || agentFilter
-                ? 'Try adjusting your filters to see more results.'
-                : 'Get started by creating your first experiment.'
-              }
-            </p>
-            <div className="mt-6">
+          <div className="text-center py-16">
+            <div className="max-w-md mx-auto">
+              <BeakerIcon className="mx-auto h-16 w-16 text-gray-400 mb-4" />
+              <h3 className="text-xl font-medium text-gray-900 dark:text-white mb-2">
+                No experiments found
+              </h3>
+              <p className="text-gray-500 dark:text-gray-400 mb-6">
+                {searchQuery || statusFilter || methodFilter || agentFilter
+                  ? 'Try adjusting your filters to see more results.'
+                  : 'Get started by creating your first experiment.'
+                }
+              </p>
               <Link
                 to="/experiment"
-                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
               >
-                <PlayIcon className="h-4 w-4 mr-2" />
+                <PlayIcon className="h-5 w-5 mr-2" />
                 New Experiment
               </Link>
             </div>
@@ -353,19 +440,19 @@ export function HistoryPage() {
 
       {/* Pagination */}
       {filteredExperiments && filteredExperiments.length >= limit && (
-        <div className="bg-white dark:bg-gray-800 px-4 py-3 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 sm:px-6">
+        <div className="bg-white dark:bg-gray-800 px-6 py-4 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 rounded-b-xl">
           <div className="flex-1 flex justify-between sm:hidden">
             <button
               onClick={() => setOffset(Math.max(0, offset - limit))}
               disabled={offset === 0}
-              className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Previous
             </button>
             <button
               onClick={() => setOffset(offset + limit)}
               disabled={filteredExperiments.length < limit}
-              className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Next
             </button>
@@ -383,14 +470,14 @@ export function HistoryPage() {
                 <button
                   onClick={() => setOffset(Math.max(0, offset - limit))}
                   disabled={offset === 0}
-                  className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm font-medium text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="relative inline-flex items-center px-4 py-2 rounded-l-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm font-medium text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Previous
                 </button>
                 <button
                   onClick={() => setOffset(offset + limit)}
                   disabled={filteredExperiments.length < limit}
-                  className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm font-medium text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="relative inline-flex items-center px-4 py-2 rounded-r-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm font-medium text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Next
                 </button>
@@ -486,9 +573,9 @@ function ExperimentRow({
                 {experiment.name}
               </Link>
             </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">
-              Route {experiment.route_id} • {experiment.route_file}
-            </div>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Route {experiment.route_name || experiment.route_id} • {experiment.route_file}
+            </p>
           </div>
         </div>
       </td>

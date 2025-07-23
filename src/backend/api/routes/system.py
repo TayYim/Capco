@@ -26,7 +26,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "service": "Carlo Fuzzing Backend"
+        "service": "CapCo Fuzzing Backend"
     }
 
 
